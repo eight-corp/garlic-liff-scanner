@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>業務管理メニュー</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f6f3; color: #24372d; font-family: "Yu Gothic UI", "Meiryo", sans-serif; }
+    main { max-width: 1100px; margin: auto; padding: 56px 32px 30px; }
+    .eyebrow { margin: 0 0 14px; color: #567060; font-size: 13px; font-weight: 700; letter-spacing: .16em; }
+    header { border-bottom: 1px solid #d7e0d8; padding-bottom: 28px; margin-bottom: 30px; }
+    h1 { font-size: clamp(28px, 4vw, 38px); letter-spacing: .04em; margin: 0 0 12px; }
+    header p { margin: 0; color: #607167; line-height: 1.8; font-size: 15px; }
+    nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+    .card { --accent: #655580; --tint: #f1edf7; display: flex; flex-direction: column; min-height: 235px; padding: 25px; background: #fff; border: 1px solid #dce3dd; border-radius: 18px; text-decoration: none; color: inherit; box-shadow: 0 3px 10px #20382a05; transition: transform .15s, box-shadow .15s, border-color .15s; }
+    .card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 8px 22px #20382a12; }
+    .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+    .icon { display: grid; place-items: center; width: 48px; height: 48px; color: var(--accent); background: var(--tint); border-radius: 13px; margin-bottom: 20px; }
+    svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    h2 { margin: 0 0 9px; font-size: 21px; line-height: 1.5; }
+    .description { font-size: 14px; line-height: 1.8; color: #657269; margin: 0 0 23px; }
+    .open { margin-top: auto; font-weight: 700; font-size: 14px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; }
+    .arrow { font-size: 22px; font-weight: 400; }
+    .fridge { --accent: #326a9a; --tint: #edf4fc; }
+    .dry { --accent: #9a6922; --tint: #fff5e4; }
+    .frozen { --accent: #247a7c; --tint: #eaf7f5; }
+    .rice { --accent: #507238; --tint: #eff5e8; }
+    footer { margin-top: 30px; font-size: 13px; color: #69786d; line-height: 1.9; }
+    footer p { margin: 4px 0; }
+    @media (max-width: 900px) { nav { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { main { padding: 28px 18px 24px; } header { margin-bottom: 20px; padding-bottom: 22px; } nav { grid-template-columns: 1fr; gap: 12px; } .card { min-height: auto; padding: 20px; display: grid; grid-template-columns: 44px 1fr; column-gap: 15px; } .icon { width: 44px; height: 44px; grid-row: 1 / 4; margin: 0; } h2 { font-size: 20px; } .description { margin-bottom: 10px; } .open { grid-column: 2; } footer { margin-top: 22px; } }
+    @media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover { transform: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">日々の業務を、ここから。</p>
+      <h1>業務管理メニュー</h1>
+      <p>使用する管理画面を選んでください。</p>
+    </header>
+    <nav aria-label="管理システム一覧">
+      <!-- リンクを変更するときは、各カードの href を編集してください。 -->
+      <a class="card" href="https://script.google.com/macros/s/AKfycbwmd8R9b6DG6-XYUxAa1gguvaFb71WGXbXPatdiaD2MKSR9wJ3mAEOEYOHyL7SDDpSc/exec" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 21V5h16v16M3 21h18M8 9h8M8 13h8M8 17h8M9 2v3m6-3v3"/></svg></span>
+        <h2>黒にんにく室管理</h2>
+        <p class="description">室ごとの入出庫・在庫・出庫予測</p>
+        <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+      <a class="card fridge" href="https://teleth-blip.github.io/garlic-liff-scanner/" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="19" rx="2"/><path d="M5 9h14M8 5v1m0 7v3M8 21v1m8-1v1"/></svg></span>
+        <h2>にんにく冷蔵庫管理</h2>
+        <p class="description">パレットの入出庫・保管場所の確認</p>
+        <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+      <a class="card dry" href="https://script.google.com/macros/s/AKfycbx_wNFUucE0ibLaNgqTvNBEoNqL-MWwUIWn7HpkbGg5RG4TEmipj8t6Tc7D-HJpYobgtA/exec" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 17c-4-4 4-6 0-10m5 10c-4-4 4-6 0-10m5 10c-4-4 4-6 0-10"/></svg></span>
+        <h2>乾燥設備在庫管理</h2>
+        <p class="description">設備の在庫・稼働状況・温湿度記録</p>
+        <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+      <a class="card frozen" href="https://teleth-blip.github.io/garlic-liff-scanner/frozen-ingredient/" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7M9 4l3 3 3-3M9 20l3-3 3 3M3.6 10l4-1-1-4M17.4 19l-1-4 4-1M3.6 14l4 1-1 4M17.4 5l-1 4 4 1"/></svg></span>
+        <h2>冷食原材料管理</h2>
+        <p class="description">原材料の入出庫・冷蔵庫別の在庫確認</p>
+        <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+      <a class="card rice" href="https://eight-corp.github.io/flexcon-trace/" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22V5m0 6C6 11 5 7 5 5c5 0 7 3 7 6Zm0 6c-6 0-7-4-7-6 5 0 7 3 7 6Zm0-6c6 0 7-4 7-6-5 0-7 3-7 6Zm0 6c6 0 7-4 7-6-5 0-7 3-7 6Zm0-12c-3-2 0-4 0-4s3 2 0 4Z"/></svg></span>
+        <h2>米穀出荷管理</h2>
+        <p class="description">米穀の在庫確認・QRコードでの出荷登録</p>
+        <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+    </nav>
+    <footer>
+      <p>各管理画面は新しいタブで開きます。ログインが必要な場合は、各画面でログインしてください。</p>
+      <p>管理画面の利用にはインターネット接続が必要です。</p>
+    </footer>
+  </main>
+</body>
+</html>
