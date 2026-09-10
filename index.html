@@ -1501,6 +1501,7 @@
       }
     }
   </style>
+<script src="./shared/business-auth.js"></script>
 </head>
 <body class="login-locked">
   <div id="loginScreen" class="login-screen">
@@ -1955,7 +1956,31 @@
   <script>
     const SUPABASE_URL = 'https://gkazhcddknmgzglcdwtk.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrYXpoY2Rka25tZ3pnbGNkd3RrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5NjE5NzcsImV4cCI6MjEwMzUzNzk3N30.3KjmIAKyUvZzIWW09SphpGycBP2PqkhVNvIKwlF2CI0';
-    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    BusinessAuth.init(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {global:{fetch:BusinessAuth.authorizedFetch}});
+    let commonMode = false;
+    let commonSession = null;
+    const commonApp = 'garlic_fridge';
+    function commonAllows(level) { return BusinessAuth.allows(commonSession, commonApp, level); }
+    function applyCommonRole() {
+      if (!commonMode || !commonSession) return;
+      const canWrite = commonAllows('operator'), canAdmin = commonAllows('admin');
+      document.querySelectorAll('[data-tab]').forEach(button => {
+        const tab = button.dataset.tab;
+        button.hidden = tab === 'master' ? !canAdmin : ['inbound','outbound','move','register'].includes(tab) && !canWrite;
+      });
+      const workerSection=$('workerRows').closest('details');
+      if (workerSection) workerSection.hidden=true;
+      if (!document.getElementById('commonAccountLink')) {
+        const link=document.createElement('a');link.id='commonAccountLink';
+        link.href=new URL(location.pathname.includes('/supabase/')?'../account/':'./account/',location.href).href+'?openExternalBrowser=1';
+        link.textContent='共通ユーザー管理';link.style.marginLeft='12px';
+        $('workerDisplay').parentElement.append(link);
+      }
+      $('commonAccountLink').hidden=!commonSession.systemAdmin;
+      if (!canWrite) { setLaunchActionPending(false); if(['inbound','outbound','move','register','master'].includes(state.tab))setTab('search'); }
+      else if (!canAdmin && state.tab==='master')setTab('inventory');
+    }
     const APP_HOME_URL = location.origin + location.pathname;
     const DEFAULT_PRODUCER_IMPORT_SOURCE = {
       path: 'https://drive.google.com/file/d/1ldXwvEHjKce0py91zJA4_T_AOSvrsWKg/view?usp=drive_link',
@@ -2008,8 +2033,10 @@
         $('launchPalletNo').textContent = state.launch.palletNo;
         setLaunchActionPending(true);
       }
+      try { commonMode = await BusinessAuth.mode(commonApp); }
+      catch (error) { showLoginScreen(error.message); return; }
       await refreshWorkersOnly({ forLogin: true });
-      if (restoreLogin()) {
+      if (await restoreLogin()) {
         await unlockApp();
       } else {
         showLoginScreen();
@@ -2404,6 +2431,7 @@
     }
 
     function setTab(tab) {
+      if (commonMode && commonSession && ((tab==='master'&&!commonAllows('admin')) || (['inbound','outbound','move','register'].includes(tab)&&!commonAllows('operator'))))tab='search';
       state.tab = tab;
       document.querySelectorAll('[data-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
       document.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
@@ -2582,9 +2610,18 @@
       }
       renderWorkers();
       await refreshAll();
+      applyCommonRole();
     }
 
     async function login() {
+      if (commonMode) {
+        try {
+          commonSession=await BusinessAuth.login($('loginWorkerSelect').value,$('loginPin').value,commonApp);
+          state.workerId=commonSession.workerId;$('loginPin').value='';
+          await unlockApp();applyCommonRole();
+        } catch(error) { $('loginMessage').textContent=error.message; }
+        return;
+      }
       const workerId = $('loginWorkerSelect').value;
       const worker = activeWorkers().find(w => w.workerId === workerId);
       if (!worker) {
@@ -2612,6 +2649,7 @@
     }
 
     function logout(message = 'ログアウトしました。') {
+      if (commonMode) { BusinessAuth.logout().catch(()=>{});commonSession=null; }
       localStorage.removeItem('garlic.login.v1');
       localStorage.removeItem('garlic.login.v2');
       localStorage.removeItem('garlic.workerId');
@@ -2621,7 +2659,8 @@
       showLoginScreen(message);
     }
 
-    function restoreLogin() {
+    async function restoreLogin() {
+      if(commonMode){commonSession=await BusinessAuth.session();if(!commonAllows('viewer'))return false;state.workerId=commonSession.workerId;return true;}
       try {
         const saved = JSON.parse(localStorage.getItem('garlic.login.v2') || '{}');
         if (!saved || !saved.workerId) return false;
@@ -4427,6 +4466,14 @@
     }
 
     async function api(method, payload = {}) {
+      if (commonMode && !['getWorkers','ping'].includes(method)) {
+        commonSession=await BusinessAuth.session();
+        if(!commonAllows('viewer')){logout('利用権限がないかセッションの有効期限が切れました。');throw new Error('再ログインしてください。');}
+        const minimum=['saveProducerSettings','saveStandards','saveCoolers','saveLocationGrid','saveWorkers'].includes(method)?'admin':method==='getAppData'?'viewer':'operator';
+        if(method==='saveWorkers')throw new Error('ユーザーは共通ユーザー管理で設定してください。');
+        if(!commonAllows(minimum))throw new Error('この操作の権限がありません。');
+        applyCommonRole();
+      }
       if (!state.loggedIn && !['getWorkers', 'ping'].includes(method)) {
         throw new Error('ログインしてください。');
       }
@@ -4529,6 +4576,7 @@
     }
 
     async function getSupabaseWorkersData() {
+      if(commonMode){const users=await BusinessAuth.users(commonApp);return {ok:true,master:{workers:users.map((u,i)=>({...u,active:true,role:commonSession?.permissions?.[commonApp]||'viewer',note:'',displayOrder:i}))}};}
       const workers = await selectAll('workers', query => query.order('display_order', { ascending: true }).order('worker_id', { ascending: true }));
       return {
         ok: true,
@@ -4551,7 +4599,7 @@
         moving,
         appSettings
       ] = await Promise.all([
-        selectAll('workers', query => query.order('display_order', { ascending: true }).order('worker_id', { ascending: true })),
+        commonMode ? getSupabaseWorkersData().then(d=>d.master.workers.map(w=>({worker_id:w.workerId,worker_name:w.workerName,role:w.role,active:true}))) : selectAll('workers', query => query.order('display_order', { ascending: true }).order('worker_id', { ascending: true })),
         selectAll('standards', query => query.order('display_order', { ascending: true }).order('standard_id', { ascending: true })),
         selectAll('coolers', query => query.order('cooler_id', { ascending: true })),
         selectAll('locations', query => query.order('cooler_id', { ascending: true }).order('level_no', { ascending: true }).order('row_no', { ascending: true }).order('col_no', { ascending: true })),
