@@ -2,8 +2,17 @@
   'use strict';
   const storageKey = 'business.session.v1';
   let baseUrl = '', apiKey = '';
-  const getToken = () => { try { return sessionStorage.getItem(storageKey) || ''; } catch { return ''; } };
-  const setToken = token => { if (token) sessionStorage.setItem(storageKey, token); else sessionStorage.removeItem(storageKey); };
+  const getToken = () => {
+    try {
+      let token=localStorage.getItem(storageKey)||'';
+      if(!token){token=sessionStorage.getItem(storageKey)||'';if(token){localStorage.setItem(storageKey,token);sessionStorage.removeItem(storageKey);}}
+      return token;
+    } catch { try{return sessionStorage.getItem(storageKey)||'';}catch{return '';} }
+  };
+  const setToken = token => {
+    try{if(token)localStorage.setItem(storageKey,token);else localStorage.removeItem(storageKey);}catch{}
+    try{sessionStorage.removeItem(storageKey);}catch{}
+  };
   const nativeFetch = window.fetch.bind(window);
   async function authorizedFetch(input, init = {}) {
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
@@ -35,4 +44,5 @@
     async logout(){try{await rpc('business_logout');}finally{setToken('');}},
     allows(session,app,minimum='viewer'){const levels={admin:3,operator:2,viewer:1};return (levels[session?.permissions?.[app]]||0)>=(levels[minimum]||99);}
   };
+  window.addEventListener('storage',event=>{if(event.key===storageKey)location.reload();});
 })();
