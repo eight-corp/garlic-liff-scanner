@@ -15,7 +15,7 @@
 <details><summary>初回の管理者設定</summary><p class="muted">データベース管理者から受け取った初期設定コードを入力してください。コードの有効期限は15分です。</p>
 <form id="setupForm"><label>初期設定コード<input id="setupToken" type="password" autocomplete="off" required></label><label>新しい共通PIN（6～12桁）<input id="setupPin" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{6,12}" required></label><label>確認用PIN<input id="setupPinConfirm" type="password" inputmode="numeric" autocomplete="new-password" required></label><button>初期設定を完了</button></form></details>
 </section>
-<div id="managementPanel" hidden><section><div class="row"><strong id="signedIn"></strong><button id="refresh" class="secondary">再読み込み</button><button id="logout" class="secondary">ログアウト</button></div><p class="muted">管理者：アプリの全操作 ／ 作業者：入出庫などの業務操作 ／ 閲覧者：閲覧のみ ／ 利用不可：アクセス不可</p><p class="muted">共通PINは未移行アプリのPINと異なるものを設定してください。全体管理者は全アプリのユーザーと権限を管理できます。</p></section>
+<div id="managementPanel" hidden><section><div class="row"><strong id="signedIn"></strong><button id="refresh" class="secondary">再読み込み</button><button id="logout" class="secondary">ログアウト</button></div><p class="muted">管理者：アプリの全操作 ／ 作業者：入出庫などの業務操作 ／ 閲覧者：閲覧のみ ／ 利用不可：アクセス不可</p><p class="muted">共通PINは6～12桁の数字で設定します。全体管理者は全アプリのユーザーと権限を管理できます。</p></section>
 <label>ユーザーを検索<input id="filter" type="search" placeholder="氏名またはID"></label>
 <div class="list-heading"><h2>有効ユーザー</h2><span id="activeCount" class="tag"></span></div>
 <div id="activeUsers"></div>

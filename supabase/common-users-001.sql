@@ -173,9 +173,6 @@ declare v_actor text:=business_private.actor(true);
 begin
  if v_actor is null then raise exception '初期設定コードが無効または期限切れです。'; end if;
  if p_pin is null or p_pin !~ '^[0-9]{6,12}$' then raise exception '共通PINは6～12桁の数字で設定してください。'; end if;
- if exists(select 1 from public.workers where worker_id=v_actor and
- substring(note from '(?:PIN|pin|ＰＩＮ|暗証番号)\s*[:：=]\s*([0-9A-Za-z_-]+)')=p_pin)
- then raise exception '未移行アプリと異なる新しいPINを設定してください。'; end if;
  update business_private.users set pin_hash=extensions.crypt(p_pin,extensions.gen_salt('bf',10)),updated_at=now() where worker_id=v_actor;
  delete from business_private.sessions where worker_id=v_actor;
  insert into business_private.audit(actor_id,action,target_id) values(v_actor,'initial_setup',v_actor);
@@ -211,9 +208,6 @@ begin
  where u.worker_id<>p_worker_id and u.system_admin and u.enabled and u.pin_hash is not null)
  then raise exception '最後の全体管理者は無効にできません。'; end if;
  if nullif(p_new_pin,'') is not null and p_new_pin !~ '^[0-9]{6,12}$' then raise exception '共通PINは6～12桁の数字です。'; end if;
- if nullif(p_new_pin,'') is not null and exists(select 1 from public.workers where worker_id=p_worker_id and
- substring(note from '(?:PIN|pin|ＰＩＮ|暗証番号)\s*[:：=]\s*([0-9A-Za-z_-]+)')=p_new_pin)
- then raise exception '未移行アプリと異なる新しいPINを設定してください。'; end if;
  for v_app,v_role in select key,value from jsonb_each_text(p_permissions) loop
   if not exists(select 1 from business_private.apps where app_id=v_app) or v_role not in ('admin','operator','viewer','') then
   raise exception 'アプリまたは権限が不正です。'; end if;
