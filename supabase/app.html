@@ -1974,7 +1974,7 @@
       if (!document.getElementById('commonAccountLink')) {
         const link=document.createElement('a');link.id='commonAccountLink';
         link.href=new URL(location.pathname.includes('/supabase/')?'../account/':'./account/',location.href).href+'?openExternalBrowser=1';
-        link.textContent='共通ユーザー管理';link.style.marginLeft='12px';
+        link.textContent='ユーザー管理';link.style.marginLeft='12px';
         $('workerDisplay').parentElement.append(link);
       }
       $('commonAccountLink').hidden=!commonSession.systemAdmin;
@@ -4470,7 +4470,7 @@
         commonSession=await BusinessAuth.session();
         if(!commonAllows('viewer')){logout('利用権限がないかセッションの有効期限が切れました。');throw new Error('再ログインしてください。');}
         const minimum=['saveProducerSettings','saveStandards','saveCoolers','saveLocationGrid','saveWorkers'].includes(method)?'admin':method==='getAppData'?'viewer':'operator';
-        if(method==='saveWorkers')throw new Error('ユーザーは共通ユーザー管理で設定してください。');
+        if(method==='saveWorkers')throw new Error('ユーザーはユーザー管理で設定してください。');
         if(!commonAllows(minimum))throw new Error('この操作の権限がありません。');
         applyCommonRole();
       }
