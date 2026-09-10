@@ -2062,7 +2062,7 @@
       bindMasterScrollAssist();
       bindRegisterDetailHorizontalScroll();
       $('reloadBtn').addEventListener('click', refreshAll);
-      $('logoutBtn').addEventListener('click', logout);
+      $('logoutBtn').addEventListener('click', logoutToMenu);
       $('loginForm').addEventListener('submit', event => {
         event.preventDefault();
         login();
@@ -2657,6 +2657,20 @@
       state.data = null;
       renderWorkers();
       showLoginScreen(message);
+    }
+
+    async function logoutToMenu() {
+      $('logoutBtn').disabled = true;
+      if (commonMode) {
+        try { await BusinessAuth.logout(); } catch (error) {}
+        commonSession = null;
+      }
+      localStorage.removeItem('garlic.login.v1');
+      localStorage.removeItem('garlic.login.v2');
+      localStorage.removeItem('garlic.workerId');
+      state.workerId = '';
+      state.data = null;
+      location.href = new URL('../menu.html?openExternalBrowser=1', location.href).href;
     }
 
     async function restoreLogin() {
