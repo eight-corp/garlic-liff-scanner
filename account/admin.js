@@ -12,9 +12,19 @@ function userForm(user,isNew=false){
  const roles=[['','利用不可'],['admin','管理者'],['operator','作業者'],['viewer','閲覧者']];
  return `<form data-user="${esc(user.workerId)}" data-new="${isNew}"><div class="grid"><label>ユーザーID<input name="workerId" value="${esc(user.workerId)}" ${isNew?'required':'readonly'}></label><label>氏名<input name="workerName" value="${esc(user.workerName)}" required></label></div><label><input name="enabled" type="checkbox" ${user.enabled?'checked':''}> 共通管理で有効</label><div class="grid">${data.apps.map(app=>`<label>${esc(app.app_name)} <span class="tag">${app.migrated?'切替済':'未移行'}</span><select data-app="${esc(app.app_id)}">${roles.map(([value,label])=>`<option value="${value}" ${value===(user.permissions?.[app.app_id]||'')?'selected':''}>${label}</option>`).join('')}</select></label>`).join('')}</div><label>${user.pinSet?'共通PINを変更（空欄なら変更なし）':'新しい共通PIN（6～12桁）'}<input name="pin" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{6,12}" maxlength="12" ${user.pinSet?'':'required'}></label><label>確認用PIN<input name="pinConfirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="12"></label><div class="row"><button>保存</button>${!isNew?`<button type="button" class="secondary" data-system="${user.systemAdmin?'false':'true'}">${user.systemAdmin?'全体管理者を解除':'全体管理者にする'}</button>`:''}</div></form>`;
 }
+function userCard(user){
+ return `<article class="user-card"><h3>${esc(user.workerName)}</h3><div class="tag">ID：${esc(user.workerId)} ／ ${user.systemAdmin?'全体管理者 ／ ':''}${user.pinSet?'共通PIN設定済み':'共通PIN未設定'}</div>${userForm(user)}</article>`;
+}
 function render(){
  const filter=$('filter').value.trim();
- $('users').innerHTML=data.users.filter(u=>!filter||u.workerId.includes(filter)||u.workerName.includes(filter)).map(u=>`<details class="card"><summary>${esc(u.workerName)} <span class="tag">${u.systemAdmin?'全体管理者 / ':''}${u.enabled?'有効':'無効'} / ${u.pinSet?'共通PIN設定済み':'共通PIN未設定'}</span></summary>${userForm(u)}</details>`).join('');
+ const visible=data.users.filter(u=>!filter||u.workerId.includes(filter)||u.workerName.includes(filter));
+ const active=visible.filter(u=>u.enabled),inactive=visible.filter(u=>!u.enabled);
+ $('activeUsers').innerHTML=active.length?active.map(userCard).join(''):'<p class="empty">該当する有効ユーザーはいません。</p>';
+ $('inactiveUsers').innerHTML=inactive.length?inactive.map(userCard).join(''):'<p class="empty">該当する無効ユーザーはいません。</p>';
+ $('activeCount').textContent=`${active.length}名`;
+ $('inactiveCount').textContent=`${inactive.length}名`;
+ $('inactiveSection').hidden=!inactive.length;
+ if(filter&&inactive.length)$('inactiveSection').open=true;
  $('newUser').innerHTML=userForm({workerId:'',workerName:'',enabled:true,permissions:{},pinSet:false},true);
 }
 $('filter').addEventListener('input',render);

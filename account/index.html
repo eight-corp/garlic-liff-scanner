@@ -3,7 +3,7 @@
 <meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>共通ユーザー管理</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f3f6f3;color:#24372d;font-family:system-ui,"Meiryo",sans-serif}main{max-width:1040px;margin:auto;padding:24px}h1{font-size:26px}h2{font-size:20px}section,details.card{background:white;border:1px solid #d8e1d9;border-radius:12px;padding:20px;margin:16px 0}label{display:block;margin:12px 0}input,select,button{font:inherit;padding:10px;border:1px solid #b7c6ba;border-radius:6px;max-width:100%}input:not([type=checkbox]),select{display:block;width:100%;margin-top:5px}button{background:#286641;color:white;cursor:pointer;min-height:44px}button:disabled{opacity:.5;cursor:wait}.secondary{background:white;color:#286641}button:focus-visible,a:focus-visible{outline:3px solid #3b89bb;outline-offset:3px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px}p{line-height:1.7}.muted{color:#66756a;font-size:14px}#status{white-space:pre-wrap;color:#9b3027}#status.success{color:#286641}[hidden]{display:none!important}summary{cursor:pointer;line-height:1.7}a{color:#23623f}.tag{font-size:13px;color:#66756a}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+*{box-sizing:border-box}body{margin:0;background:#f3f6f3;color:#24372d;font-family:system-ui,"Meiryo",sans-serif}main{max-width:1040px;margin:auto;padding:24px}h1{font-size:26px}h2{font-size:20px}section,details.card,.user-card{background:white;border:1px solid #d8e1d9;border-radius:12px;padding:20px;margin:16px 0}label{display:block;margin:12px 0}input,select,button{font:inherit;padding:10px;border:1px solid #b7c6ba;border-radius:6px;max-width:100%}input:not([type=checkbox]),select{display:block;width:100%;margin-top:5px}button{background:#286641;color:white;cursor:pointer;min-height:44px}button:disabled{opacity:.5;cursor:wait}.secondary{background:white;color:#286641}button:focus-visible,a:focus-visible{outline:3px solid #3b89bb;outline-offset:3px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px}p{line-height:1.7}.muted{color:#66756a;font-size:14px}#status{white-space:pre-wrap;color:#9b3027}#status.success{color:#286641}[hidden]{display:none!important}summary{cursor:pointer;line-height:1.7}a{color:#23623f}.tag{font-size:13px;color:#66756a}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.list-heading{display:flex;align-items:baseline;gap:8px;margin-top:28px}.list-heading h2{margin:0}.user-card h3{margin:0 0 4px;font-size:19px}.user-card{box-shadow:0 1px 2px #1539200d}.archive{background:#eef2ef}.archive>.muted{margin-top:10px}.archive .user-card{background:#fafbfa}.empty{padding:16px;border:1px dashed #b7c6ba;border-radius:8px;color:#66756a}@media(max-width:560px){main{padding:16px}.user-card,section,details.card{padding:16px}.row button{flex:1}}
 </style></head><body><main>
 <header><h1>共通ユーザー管理</h1><a href="../menu.html?openExternalBrowser=1">業務メニューへ</a></header>
 <p>ユーザーごとに、各アプリの利用権限を設定します。未移行アプリの権限は切替後に有効になります。</p>
@@ -17,6 +17,12 @@
 </section>
 <div id="managementPanel" hidden><section><div class="row"><strong id="signedIn"></strong><button id="refresh" class="secondary">再読み込み</button><button id="logout" class="secondary">ログアウト</button></div><p class="muted">管理者：アプリの全操作 ／ 作業者：入出庫などの業務操作 ／ 閲覧者：閲覧のみ ／ 利用不可：アクセス不可</p><p class="muted">共通PINは未移行アプリのPINと異なるものを設定してください。全体管理者は全アプリのユーザーと権限を管理できます。</p></section>
 <label>ユーザーを検索<input id="filter" type="search" placeholder="氏名またはID"></label>
-<div id="users"></div>
+<div class="list-heading"><h2>有効ユーザー</h2><span id="activeCount" class="tag"></span></div>
+<div id="activeUsers"></div>
+<details id="inactiveSection" class="card archive">
+<summary><strong>無効ユーザー保管</strong> <span id="inactiveCount" class="tag"></span></summary>
+<p class="muted">過去の入出庫履歴と監査記録を保つため、ユーザーは完全削除せず、無効状態でここに保管します。再び利用する場合は「共通管理で有効」を選んで保存してください。</p>
+<div id="inactiveUsers"></div>
+</details>
 <details class="card"><summary>新しいユーザーを追加</summary><div id="newUser"></div></details>
 </div></main><script src="../shared/business-auth.js"></script><script src="../shared/business-config.js"></script><script src="admin.js"></script></body></html>
