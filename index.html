@@ -1611,6 +1611,7 @@
         <div class="worker-select-label"><span class="worker-caption">作業者</span>
           <span id="workerDisplay" class="worker-display" aria-label="ログイン中の作業者"></span>
         </div>
+        <button type="button" id="menuBtn" class="secondary header-btn"><i data-lucide="house"></i><span>メニュー</span></button>
         <button type="button" id="reloadBtn" class="secondary header-btn"><i data-lucide="refresh-cw"></i><span>更新</span></button>
         <button type="button" id="logoutBtn" class="secondary header-btn"><i data-lucide="log-out"></i><span>ログアウト</span></button>
       </div>
@@ -1971,13 +1972,6 @@
       });
       const workerSection=$('workerRows').closest('details');
       if (workerSection) workerSection.hidden=true;
-      if (!document.getElementById('commonAccountLink')) {
-        const link=document.createElement('a');link.id='commonAccountLink';
-        link.href=new URL(location.pathname.includes('/supabase/')?'../account/':'./account/',location.href).href+'?openExternalBrowser=1';
-        link.textContent='ユーザー管理';link.style.marginLeft='12px';
-        $('workerDisplay').parentElement.append(link);
-      }
-      $('commonAccountLink').hidden=!commonSession.systemAdmin;
       if (!canWrite) { setLaunchActionPending(false); if(['inbound','outbound','move','register','master'].includes(state.tab))setTab('search'); }
       else if (!canAdmin && state.tab==='master')setTab('inventory');
     }
@@ -2061,6 +2055,7 @@
       });
       bindMasterScrollAssist();
       bindRegisterDetailHorizontalScroll();
+      $('menuBtn').addEventListener('click', returnToMenu);
       $('reloadBtn').addEventListener('click', refreshAll);
       $('logoutBtn').addEventListener('click', logoutToMenu);
       $('loginForm').addEventListener('submit', event => {
@@ -2659,6 +2654,10 @@
       showLoginScreen(message);
     }
 
+    function returnToMenu() {
+      location.href = new URL(location.pathname.includes('/supabase/') ? '../menu.html?openExternalBrowser=1' : './menu.html?openExternalBrowser=1', location.href).href;
+    }
+
     async function logoutToMenu() {
       $('logoutBtn').disabled = true;
       if (commonMode) {
@@ -2670,7 +2669,7 @@
       localStorage.removeItem('garlic.workerId');
       state.workerId = '';
       state.data = null;
-      location.href = new URL('./menu.html?openExternalBrowser=1', location.href).href;
+      returnToMenu();
     }
 
     async function restoreLogin() {
