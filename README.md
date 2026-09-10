@@ -5,17 +5,17 @@
 ## 正式版
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/
+https://eight-corp.github.io/garlic-liff-scanner/
 ```
 
 ## Supabase確認ページ
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/supabase/
+https://eight-corp.github.io/garlic-liff-scanner/supabase/
 ```
 
 ## 冷食原料 在庫管理
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/frozen-ingredient/
+https://eight-corp.github.io/garlic-liff-scanner/frozen-ingredient/
 ```

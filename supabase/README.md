@@ -78,7 +78,7 @@ PIN未設定の作業者はログインできません。
 GitHub Pagesに反映後、次の確認URLを開きます。
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/supabase/
+https://eight-corp.github.io/garlic-liff-scanner/supabase/
 ```
 
 `接続OK` と表示され、作業者が表示されればSupabase接続は成功です。
@@ -87,7 +87,7 @@ https://teleth-blip.github.io/garlic-liff-scanner/supabase/
 正式版アプリ:
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/
+https://eight-corp.github.io/garlic-liff-scanner/
 ```
 
 ## 5. 現在の運用への影響
@@ -97,13 +97,13 @@ https://teleth-blip.github.io/garlic-liff-scanner/
 正式版:
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/
+https://eight-corp.github.io/garlic-liff-scanner/
 ```
 
 Supabase版準備確認:
 
 ```text
-https://teleth-blip.github.io/garlic-liff-scanner/supabase/
+https://eight-corp.github.io/garlic-liff-scanner/supabase/
 ```
 
 ## 6. 注意
