@@ -1,14 +1,13 @@
 (function () {
   'use strict';
 
-  const CONFIG_KEY = 'reishoku.supabase.config.v1';
   const TAB_KEY = 'reishoku.active.tab.v1';
-  const WORKER_KEY = 'reishoku.workerId';
-  const LOGIN_KEY = 'reishoku.login.v1';
+  const APP_ID = 'frozen_ingredients';
+  const MENU_URL = new URL('../menu.html?openExternalBrowser=1', window.location.href).href;
   const ids = [
-    'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
-    'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
-    'syncStatus', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
+    'authScreen', 'appShell', 'loginMessage', 'homeButton', 'refreshButton', 'signOutButton',
+    'syncStatus', 'currentRole', 'currentUser',
+    'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
     'inboundQuantity', 'inboundUnit', 'inboundNote', 'outboundForm', 'outboundFridge', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
     'materialInventoryList', 'fridgeMasterPanel', 'materialMasterPanel', 'fridgeForm', 'fridgeId',
@@ -26,11 +25,12 @@
   const state = {
     client: null,
     loggedIn: false,
-    workerId: getStore(WORKER_KEY) || '',
+    workerId: '',
+    session: null,
+    role: '',
     activeTab: getStore(TAB_KEY) || 'inbound',
     masterMode: 'fridges',
     selectedLotId: '',
-    workers: [],
     fridges: [],
     materials: [],
     lots: []
@@ -44,40 +44,19 @@
     bind();
     icons();
     const config = readConfig();
-    fillSetup(config);
-    if (!configured(config)) return showSetup();
+    if (!configured(config)) return showAuth('本番Supabaseの接続設定を読み込めませんでした。');
     try {
       await connect(config);
     } catch (error) {
-      showSetup();
+      showAuth(message(error));
       toast(message(error), 'error');
     }
   }
 
   function bind() {
-    el.setupForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const config = {
-        supabaseUrl: el.setupUrl.value.trim(),
-        supabaseAnonKey: el.setupAnonKey.value.trim()
-      };
-      if (!configured(config)) return toast('Supabaseの接続情報を入力してください。', 'error');
-      setJson(CONFIG_KEY, config);
-      await connect(config);
-    });
-    el.authForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      await login();
-    });
+    el.homeButton.addEventListener('click', returnToMenu);
     el.refreshButton.addEventListener('click', () => loadData());
     el.signOutButton.addEventListener('click', signOut);
-    el.workerSelect.addEventListener('change', () => {
-      const worker = activeWorkers().find((item) => item.workerId === el.workerSelect.value);
-      if (!worker) return;
-      state.workerId = worker.workerId;
-      saveLogin(worker);
-      renderWorkers();
-    });
     el.inboundForm.addEventListener('submit', inbound);
     el.inboundMaterial.addEventListener('change', renderUnits);
     el.outboundForm.addEventListener('submit', outbound);
@@ -115,75 +94,37 @@
 
   async function connect(config) {
     if (!window.supabase || !window.supabase.createClient) throw new Error('Supabase client library was not loaded.');
-    state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    if (!window.BusinessAuth) throw new Error('共通認証を読み込めませんでした。');
+    window.BusinessAuth.init(config.supabaseUrl, config.supabaseAnonKey);
+    state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
+      global: { fetch: window.BusinessAuth.authorizedFetch }
+    });
     status('接続中', true);
-    await loadWorkers();
-    if (restoreLogin()) return unlock();
-    showAuth('ログインしてください。');
-    status('未ログイン');
-  }
-
-  async function loadWorkers() {
-    const { data, error } = await state.client
-      .from('workers')
-      .select('worker_id, worker_name, role, display_order, active, note')
-      .order('display_order', { ascending: true })
-      .order('worker_id', { ascending: true });
-    if (error) throw error;
-    state.workers = (data || []).map(mapWorker);
-    renderWorkers();
-    if (!state.workers.length) showAuth('作業者マスタが未登録です。');
-  }
-
-  async function login() {
-    const worker = activeWorkers().find((item) => item.workerId === el.loginWorkerSelect.value);
-    if (!worker) return showAuth('作業者を選択してください。');
-    const pin = workerPin(worker);
-    if (!pin) return el.loginMessage.textContent = 'この作業者にはPINが設定されていません。作業者マスタの備考に「PIN: 数字」を設定してください。';
-    if (clean(el.loginPin.value) !== pin) return el.loginMessage.textContent = 'PINが違います。';
-    state.workerId = worker.workerId;
-    saveLogin(worker);
-    el.loginPin.value = '';
-    await unlock();
-  }
-
-  function saveLogin(worker) {
-    setStore(WORKER_KEY, worker.workerId);
-    setJson(LOGIN_KEY, { workerId: worker.workerId, workerName: worker.workerName, loggedInAt: new Date().toISOString() });
-  }
-
-  function restoreLogin() {
-    const saved = getJson(LOGIN_KEY);
-    if (!saved || !saved.workerId) return false;
-    const worker = activeWorkers().find((item) => item.workerId === saved.workerId);
-    if (!worker) return false;
-    state.workerId = worker.workerId;
-    setStore(WORKER_KEY, worker.workerId);
-    return true;
+    const session = await window.BusinessAuth.session();
+    if (!window.BusinessAuth.allows(session, APP_ID, 'viewer')) {
+      showAuth('業務管理メニューでログインしてください。');
+      window.location.replace(MENU_URL);
+      return;
+    }
+    state.session = session;
+    state.workerId = session.workerId;
+    state.role = session.permissions[APP_ID];
+    state.loggedIn = true;
+    showApp();
+    renderAccess();
+    await loadData();
   }
 
   async function signOut() {
-    removeStore(LOGIN_KEY);
-    removeStore(WORKER_KEY);
-    state.loggedIn = false;
-    state.workerId = '';
-    state.lots = [];
-    showAuth('ログアウトしました。');
-    status('未ログイン');
+    try { await window.BusinessAuth.logout(); } finally { window.location.replace(MENU_URL); }
   }
 
-  async function unlock() {
-    state.loggedIn = true;
-    showApp();
-    renderWorkers();
-    await loadData();
-  }
+  function returnToMenu() { window.location.href = MENU_URL; }
 
   async function loadData(options) {
     if (!state.client || !state.loggedIn) return;
     if (!options || !options.silent) status('更新中', true);
-    const [workers, fridges, materials, lots] = await Promise.all([
-      state.client.from('workers').select('worker_id, worker_name, role, display_order, active, note').order('display_order', { ascending: true }).order('worker_id', { ascending: true }),
+    const [fridges, materials, lots] = await Promise.all([
       state.client.from('frozen_ingredient_fridges').select('*').order('name', { ascending: true }),
       state.client.from('frozen_ingredient_materials').select('*').order('supplier_name', { ascending: true }).order('material_name', { ascending: true }),
       state.client
@@ -192,15 +133,10 @@
         .gt('quantity', 0)
         .order('expiration_date', { ascending: true })
     ]);
-    const error = workers.error || fridges.error || materials.error || lots.error;
+    const error = fridges.error || materials.error || lots.error;
     if (error) {
       status('更新失敗');
       return toast(message(error), 'error');
-    }
-    state.workers = (workers.data || []).map(mapWorker);
-    if (!activeWorkers().some((worker) => worker.workerId === state.workerId)) {
-      await signOut();
-      return showAuth('作業者が無効になりました。再ログインしてください。');
     }
     state.fridges = fridges.data || [];
     state.materials = materials.data || [];
@@ -211,6 +147,7 @@
 
   async function inbound(event) {
     event.preventDefault();
+    if (!can('operator')) return toast('入庫操作の権限がありません。', 'error');
     const payload = {
       p_worker_id: state.workerId,
       p_fridge_id: el.inboundFridge.value,
@@ -231,6 +168,7 @@
 
   async function outbound(event) {
     event.preventDefault();
+    if (!can('operator')) return toast('出庫操作の権限がありません。', 'error');
     const quantity = Number(el.outboundQuantity.value);
     if (!state.selectedLotId || quantity <= 0) return toast('出庫する在庫と数量を確認してください。', 'error');
     await runForm(el.outboundForm, '出庫登録中', async () => {
@@ -264,6 +202,7 @@
 
   async function saveFridge(event) {
     event.preventDefault();
+    if (!can('admin')) return toast('マスタ管理の権限がありません。', 'error');
     const id = el.fridgeId.value;
     const values = { name: clean(el.fridgeName.value), note: clean(el.fridgeNote.value) || null, is_active: el.fridgeActive.checked };
     if (!values.name) return;
@@ -279,6 +218,7 @@
 
   async function saveMaterial(event) {
     event.preventDefault();
+    if (!can('admin')) return toast('マスタ管理の権限がありません。', 'error');
     const id = el.materialId.value;
     const values = {
       supplier_name: clean(el.supplierName.value),
@@ -298,7 +238,6 @@
   }
 
   function renderAll() {
-    renderWorkers();
     renderTabs();
     renderSelects();
     renderFridgeInventory();
@@ -310,13 +249,19 @@
   }
 
   function renderTabs() {
-    if (!panels[state.activeTab]) state.activeTab = 'inbound';
-    document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('active', button.dataset.tab === state.activeTab));
+    const permittedTabs = Object.keys(panels).filter(tabAllowed);
+    if (!permittedTabs.includes(state.activeTab)) state.activeTab = can('operator') ? 'inbound' : 'fridges';
+    document.querySelectorAll('[data-tab]').forEach((button) => {
+      button.hidden = !tabAllowed(button.dataset.tab);
+      button.classList.toggle('active', button.dataset.tab === state.activeTab);
+    });
+    document.querySelector('.bottom-tabs').style.gridTemplateColumns = `repeat(${permittedTabs.length}, minmax(0, 1fr))`;
     Object.entries(panels).forEach(([tab, id]) => document.getElementById(id).classList.toggle('hidden', tab !== state.activeTab));
   }
 
   function setTab(tab) {
-    state.activeTab = panels[tab] ? tab : 'inbound';
+    if (!tabAllowed(tab)) return;
+    state.activeTab = tab;
     setStore(TAB_KEY, state.activeTab);
     renderTabs();
     if (state.activeTab === 'outbound') renderOutboundLots();
@@ -425,16 +370,6 @@
     </div>`;
   }
 
-  function renderWorkers() {
-    const workers = activeWorkers();
-    fillWorker(el.loginWorkerSelect, workers, '作業者が未登録です');
-    fillWorker(el.workerSelect, workers, '作業者なし');
-    if (state.workerId && workers.some((worker) => worker.workerId === state.workerId)) {
-      el.loginWorkerSelect.value = state.workerId;
-      el.workerSelect.value = state.workerId;
-    }
-  }
-
   function fillSelect(select, rows, label, emptyLabel) {
     const previous = select.value;
     select.innerHTML = '';
@@ -449,22 +384,6 @@
     select.disabled = false;
     rows.forEach((row) => select.append(new Option(label(row), row.id)));
     if (rows.some((row) => row.id === previous)) select.value = previous;
-  }
-
-  function fillWorker(select, rows, emptyLabel) {
-    const previous = select.value;
-    select.innerHTML = '';
-    if (!rows.length) {
-      const option = new Option(emptyLabel, '');
-      option.disabled = true;
-      option.selected = true;
-      select.append(option);
-      select.disabled = true;
-      return;
-    }
-    select.disabled = false;
-    rows.forEach((worker) => select.append(new Option(worker.workerName, worker.workerId)));
-    if (rows.some((worker) => worker.workerId === previous)) select.value = previous;
   }
 
   function editFridge(event) {
@@ -507,66 +426,43 @@
     el.materialActive.checked = true;
   }
 
-  function showSetup() {
-    el.setupScreen.classList.remove('hidden');
-    el.authScreen.classList.add('hidden');
-    el.appShell.classList.add('hidden');
-    icons();
-  }
-
   function showAuth(text) {
-    el.setupScreen.classList.add('hidden');
     el.authScreen.classList.remove('hidden');
     el.appShell.classList.add('hidden');
     el.loginMessage.textContent = text || '';
-    renderWorkers();
     icons();
   }
 
   function showApp() {
-    el.setupScreen.classList.add('hidden');
     el.authScreen.classList.add('hidden');
     el.appShell.classList.remove('hidden');
     renderTabs();
   }
 
   function readConfig() {
-    const fileConfig = {
+    return {
       supabaseUrl: window.APP_CONFIG && window.APP_CONFIG.supabaseUrl ? window.APP_CONFIG.supabaseUrl : '',
       supabaseAnonKey: window.APP_CONFIG && window.APP_CONFIG.supabaseAnonKey ? window.APP_CONFIG.supabaseAnonKey : ''
     };
-    if (configured(fileConfig)) return fileConfig;
-    const stored = getJson(CONFIG_KEY);
-    if (configured(stored)) return stored;
-    return fileConfig;
-  }
-
-  function fillSetup(config) {
-    el.setupUrl.value = config.supabaseUrl || '';
-    el.setupAnonKey.value = config.supabaseAnonKey || '';
   }
 
   function configured(config) {
     return Boolean(config && config.supabaseUrl && config.supabaseAnonKey && !String(config.supabaseUrl).includes('YOUR-') && !String(config.supabaseAnonKey).includes('YOUR-'));
   }
 
-  function mapWorker(row) {
-    return {
-      workerId: row.worker_id || '',
-      workerName: row.worker_name || row.worker_id || '',
-      role: row.role || 'operator',
-      displayOrder: Number(row.display_order || 999),
-      active: row.active !== false,
-      note: row.note || ''
-    };
+  function can(minimum) { return window.BusinessAuth.allows(state.session, APP_ID, minimum); }
+  function tabAllowed(tab) {
+    if (!panels[tab]) return false;
+    if (tab === 'master') return can('admin');
+    if (tab === 'inbound' || tab === 'outbound') return can('operator');
+    return can('viewer');
   }
-
-  function workerPin(worker) {
-    const match = clean(worker && worker.note).match(/(?:PIN|pin|ＰＩＮ|暗証番号)\s*[:：=]\s*([0-9A-Za-z_-]+)/);
-    return match ? match[1] : '';
+  function renderAccess() {
+    const names = { admin: '管理者', operator: '作業者', viewer: '閲覧者' };
+    el.currentRole.textContent = names[state.role] || state.role;
+    el.currentUser.textContent = state.session ? state.session.workerName : '';
+    renderTabs();
   }
-
-  function activeWorkers() { return state.workers.filter((worker) => worker.active); }
   function activeLots() { return state.lots.filter((lot) => Number(lot.quantity) > 0); }
   function renderUnits() {
     const inboundMaterial = state.materials.find((item) => item.id === el.inboundMaterial.value);
@@ -682,16 +578,5 @@
   }
   function removeStore(key) {
     try { window.localStorage.removeItem(key); } catch (_error) {}
-  }
-  function getJson(key) {
-    try {
-      const value = getStore(key);
-      return value ? JSON.parse(value) : null;
-    } catch (_error) {
-      return null;
-    }
-  }
-  function setJson(key, value) {
-    try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (_error) {}
   }
 })();

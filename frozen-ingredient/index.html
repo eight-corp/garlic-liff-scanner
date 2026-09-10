@@ -13,33 +13,6 @@
 </head>
 <body>
   <main class="page">
-    <section id="setupScreen" class="screen compact-screen hidden">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <i data-lucide="snowflake"></i>
-        </div>
-        <div>
-          <p class="eyebrow">Supabase</p>
-          <h1>接続設定</h1>
-        </div>
-      </div>
-
-      <form id="setupForm" class="stack">
-        <label>
-          <span>Project URL</span>
-          <input id="setupUrl" type="url" autocomplete="off" placeholder="https://xxxxxxxx.supabase.co" required>
-        </label>
-        <label>
-          <span>Anon key</span>
-          <input id="setupAnonKey" type="password" autocomplete="off" required>
-        </label>
-        <button class="primary" type="submit">
-          <i data-lucide="plug-zap"></i>
-          接続
-        </button>
-      </form>
-    </section>
-
     <section id="authScreen" class="screen compact-screen hidden">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
@@ -51,21 +24,13 @@
         </div>
       </div>
 
-      <form id="authForm" class="stack">
-        <label>
-          <span>作業者</span>
-          <select id="loginWorkerSelect" required></select>
-        </label>
-        <label>
-          <span>PIN</span>
-          <input id="loginPin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="必須" required>
-        </label>
-        <button id="authSubmit" class="primary" type="submit">
-          <i data-lucide="log-in"></i>
-          ログイン
-        </button>
-        <div id="loginMessage" class="login-message"></div>
-      </form>
+      <div class="stack">
+        <p id="loginMessage" class="login-message">業務管理メニューでログインしてください。</p>
+        <a class="primary button-link" href="../menu.html?openExternalBrowser=1">
+          <i data-lucide="house"></i>
+          業務管理メニューへ
+        </a>
+      </div>
     </section>
 
     <section id="appShell" class="app-shell hidden">
@@ -75,6 +40,9 @@
           <h1>在庫管理</h1>
         </div>
         <div class="header-actions">
+          <button id="homeButton" class="icon-button" type="button" aria-label="業務管理メニューへ" title="業務管理メニューへ">
+            <i data-lucide="house"></i>
+          </button>
           <button id="refreshButton" class="icon-button" type="button" aria-label="更新" title="更新">
             <i data-lucide="refresh-cw"></i>
           </button>
@@ -86,10 +54,10 @@
 
       <div class="status-row">
         <span id="syncStatus" class="status-pill">接続中</span>
-        <label class="worker-switch">
-          <span>作業者</span>
-          <select id="workerSelect"></select>
-        </label>
+        <div class="worker-switch" aria-label="ログイン中のユーザー">
+          <span id="currentRole">権限確認中</span>
+          <strong id="currentUser"></strong>
+        </div>
       </div>
 
       <section id="tabInbound" class="tab-panel">
@@ -260,23 +228,23 @@
       </section>
 
       <nav class="bottom-tabs" aria-label="主要メニュー">
-        <button class="active" type="button" data-tab="inbound">
+        <button class="active" type="button" data-tab="inbound" data-min-role="operator">
           <i data-lucide="arrow-down-to-line"></i>
           <span>入庫</span>
         </button>
-        <button type="button" data-tab="outbound">
+        <button type="button" data-tab="outbound" data-min-role="operator">
           <i data-lucide="arrow-up-from-line"></i>
           <span>出庫</span>
         </button>
-        <button type="button" data-tab="fridges">
+        <button type="button" data-tab="fridges" data-min-role="viewer">
           <i data-lucide="warehouse"></i>
           <span>冷蔵庫</span>
         </button>
-        <button type="button" data-tab="materials">
+        <button type="button" data-tab="materials" data-min-role="viewer">
           <i data-lucide="boxes"></i>
           <span>原料</span>
         </button>
-        <button type="button" data-tab="master">
+        <button type="button" data-tab="master" data-min-role="admin">
           <i data-lucide="settings-2"></i>
           <span>マスタ</span>
         </button>
@@ -286,6 +254,7 @@
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="./app.js"></script>
+  <script src="../shared/business-auth.js?v=20260910-frozen-common"></script>
+  <script src="./app.js?v=20260910-frozen-common"></script>
 </body>
 </html>

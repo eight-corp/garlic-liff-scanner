@@ -354,6 +354,19 @@ input[readonly] {
   font-weight: 800;
 }
 
+.button-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  text-decoration: none;
+}
+
+.worker-switch strong {
+  color: var(--text);
+}
+
 .tab-panel {
   display: grid;
   gap: 8px;
