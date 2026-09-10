@@ -9,7 +9,7 @@
 <p>ユーザーごとに、各アプリの利用権限を設定します。未移行アプリの権限は切替後に有効になります。</p>
 <p id="status" role="status" aria-live="polite"></p>
 <section id="loginPanel"><h2>全体管理者ログイン</h2><form id="loginForm">
-<label>ユーザー<select id="loginUser" required></select></label>
+<label>ユーザー<select id="loginUser" autocomplete="username" required></select></label>
 <label>共通PIN<input id="loginPin" type="password" inputmode="numeric" autocomplete="current-password" required maxlength="12"></label>
 <button>ログイン</button></form>
 <details><summary>初回の管理者設定</summary><p class="muted">データベース管理者から受け取った初期設定コードを入力してください。コードの有効期限は15分です。</p>
@@ -27,4 +27,4 @@
 <details class="card"><summary>新しいユーザーを追加</summary><div id="newUser"></div></details>
 </div>
 <dialog id="pinDialog" aria-labelledby="pinDialogTitle"><h2 id="pinDialogTitle">共通PINの設定</h2><p id="pinTargetName" class="muted"></p><label>新しい共通PIN（6～12桁）<input id="dialogPin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="12"></label><label>確認用PIN<input id="dialogPinConfirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="12"></label><p id="pinDialogError" role="alert"></p><div class="row"><button type="button" id="pinApply">入力内容を反映</button><button type="button" id="pinCancel" class="secondary">キャンセル</button></div><p class="muted">反映後、対象ユーザーの行が黄色になります。右端の「変更を保存」を押すと確定します。</p></dialog>
-</main><script src="../shared/business-auth.js?v=20260910-save-feedback"></script><script src="../shared/business-config.js?v=20260910-save-feedback"></script><script src="admin.js?v=20260910-gas-label"></script></body></html>
+</main><script src="../shared/business-auth.js?v=20260910-save-feedback"></script><script src="../shared/business-config.js?v=20260910-save-feedback"></script><script src="admin.js?v=20260911-remember-user"></script></body></html>
