@@ -30,9 +30,10 @@ async function showMenu(session){
  let visible=0;
  document.querySelectorAll('.card[data-app]').forEach(card=>{
   const role=session.permissions?.[card.dataset.app]||'';
-  card.hidden=!role;
+  const allowed=!!role&&(!card.dataset.minRole||auth.allows(session,card.dataset.app,card.dataset.minRole));
+  card.hidden=!allowed;
   let badge=card.querySelector('.role');
-  if(role){visible++;if(!badge){badge=document.createElement('span');badge.className='role';card.querySelector('.description').after(badge);}badge.textContent=roleNames[role]||role;}
+  if(allowed){visible++;if(!badge){badge=document.createElement('span');badge.className='role';card.querySelector('.description').after(badge);}badge.textContent=roleNames[role]||role;}
  });
  $('managementLink').hidden=!session.systemAdmin;
  $('noApps').hidden=visible>0;
