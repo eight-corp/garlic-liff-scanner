@@ -491,6 +491,35 @@
       opacity: .42;
       filter: grayscale(1);
     }
+    .launch-data-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      margin: 8px 0 12px;
+      padding: 9px 11px;
+      border: 1px solid #b9d6c8;
+      border-radius: 7px;
+      background: #edf8f2;
+      color: var(--brand-dark);
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .launch-data-status.error {
+      border-color: #e5aaa5;
+      background: #fff1f0;
+      color: var(--danger);
+    }
+    .launch-spinner {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      border: 3px solid rgba(23, 107, 85, .22);
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      animation: launch-spin .8s linear infinite;
+    }
+    @keyframes launch-spin { to { transform: rotate(360deg); } }
     .hidden { display: none !important; }
     .section-title {
       display: flex;
@@ -1625,6 +1654,10 @@
         <span id="launchPalletNo" class="notice"></span>
       </div>
       <p class="muted">スマホ標準カメラから開きました。処理を選んでください。</p>
+      <div id="launchDataStatus" class="launch-data-status hidden" role="status" aria-live="polite">
+        <span class="launch-spinner" aria-hidden="true"></span>
+        <span id="launchDataStatusText">データを読み込み中です...</span>
+      </div>
       <div class="action-row">
         <button type="button" data-launch-action="inbound">入庫へ</button>
         <button type="button" data-launch-action="outbound">出庫へ</button>
@@ -2009,6 +2042,7 @@
       launch: getLaunchParams(),
       pendingOperation: '',
       launchActionPending: false,
+      dataLoadPromise: null,
       inventory3dRequestId: 0
     };
 
@@ -2026,6 +2060,7 @@
         $('launchPanel').classList.remove('hidden');
         $('launchPalletNo').textContent = state.launch.palletNo;
         setLaunchActionPending(true);
+        setLaunchDataLoading(true);
       }
       try { commonMode = await BusinessAuth.mode(commonApp); }
       catch (error) { showLoginScreen(error.message); return; }
@@ -2375,8 +2410,19 @@
       }
     }
 
-    async function refreshAll() {
+    function refreshAll() {
+      if (state.dataLoadPromise) return state.dataLoadPromise;
+      const loadPromise = loadAllData();
+      state.dataLoadPromise = loadPromise;
+      loadPromise.finally(() => {
+        if (state.dataLoadPromise === loadPromise) state.dataLoadPromise = null;
+      });
+      return loadPromise;
+    }
+
+    async function loadAllData() {
       try {
+        if (state.launch.palletNo && !state.data) setLaunchDataLoading(true);
         showToast('作業者を読み込んでいます。');
         const workersReady = await refreshWorkersOnly().catch(error => {
           console.warn(error);
@@ -2392,8 +2438,10 @@
           return;
         }
         renderAll();
+        setLaunchDataLoading(false);
         showToast('読み込みました。');
       } catch (error) {
+        setLaunchDataLoading(false, 'データを読み込めませんでした。更新ボタンを押して再試行してください。');
         showToast(error.message, true);
       }
     }
@@ -2469,9 +2517,14 @@
       return merged;
     }
 
-    function applyLaunchAction(action) {
+    async function applyLaunchAction(action) {
       const palletNo = state.launch.palletNo;
       if (!palletNo) return;
+      if (!state.data) {
+        setLaunchDataLoading(true);
+        await refreshAll();
+        if (!state.data) return;
+      }
       setLaunchActionPending(false);
       dismissLaunchPanel();
       if (action === 'inbound') {
@@ -2501,6 +2554,20 @@
         renderMoveStartGrid();
         renderMovingList();
       }
+    }
+
+    function setLaunchDataLoading(loading, message = '') {
+      if (!state.launch.palletNo) return;
+      const status = $('launchDataStatus');
+      const statusText = $('launchDataStatusText');
+      const failed = !loading && !!message;
+      status.classList.toggle('hidden', !loading && !failed);
+      status.classList.toggle('error', failed);
+      status.querySelector('.launch-spinner').classList.toggle('hidden', !loading);
+      statusText.textContent = loading ? 'データを読み込み中です...' : message;
+      document.querySelectorAll('[data-launch-action]').forEach(button => {
+        button.disabled = loading || failed;
+      });
     }
 
     function setLaunchActionPending(pending) {
