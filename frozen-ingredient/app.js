@@ -11,7 +11,7 @@
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
     'materialInventoryList', 'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
     'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm',
@@ -519,7 +519,8 @@
   }
 
   function renderInboundInventory() {
-    el.inboundInventoryList.innerHTML = materialInventoryHtml('このカテゴリの現在庫がありません。');
+    el.inboundFridgeInventoryList.innerHTML = inboundFridgeInventoryHtml();
+    el.inboundMaterialInventoryList.innerHTML = inboundMaterialInventoryHtml();
   }
 
   function renderMaterialInventory() {
@@ -539,10 +540,69 @@
     }).join('') || `<div class="empty-row">${esc(emptyLabel)}</div>`;
   }
 
+  function inboundFridgeInventoryHtml() {
+    const groups = groupBy(activeLots().sort(compareLotsForFridge), (lot) => lot.fridge_id);
+    return sortName(state.fridges).map((fridge) => {
+      const lots = groups.get(fridge.id) || [];
+      if (!lots.length) return '';
+      const materialGroups = groupBy(lots, (lot) => lot.material_id);
+      const rows = Array.from(materialGroups.values())
+        .map((rowLots) => ({ material: materialFor(rowLots[0]), lots: rowLots }))
+        .filter((row) => row.material)
+        .sort((a, b) => compareMaterials(a.material, b.material))
+        .map((row) => summaryRow(materialName(row.material), materialMeta(row.material), qtyUnit(sum(row.lots), row.material), expiryChips(row.lots, row.material)))
+        .join('');
+      return summaryGroup(fridge.name, fridgeSummary(lots), ['品目', '数量', '期限/管理日'], rows);
+    }).join('') || '<div class="empty-row">このカテゴリの現在庫がありません。</div>';
+  }
+
+  function inboundMaterialInventoryHtml() {
+    const groups = groupBy(activeLots().sort(compareLotsForMaterial), (lot) => lot.material_id);
+    return sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => {
+      const lots = groups.get(material.id) || [];
+      if (!lots.length) return '';
+      const fridgeGroups = groupBy(lots, (lot) => lot.fridge_id);
+      const rows = Array.from(fridgeGroups.values())
+        .map((rowLots) => ({ fridge: fridgeFor(rowLots[0]), lots: rowLots }))
+        .sort((a, b) => String(fridgeName(a.fridge)).localeCompare(String(fridgeName(b.fridge)), 'ja'))
+        .map((row) => summaryRow(fridgeName(row.fridge), '', qtyUnit(sum(row.lots), material), expiryChips(row.lots, material)))
+        .join('');
+      return summaryGroup(material.material_name, qtyUnit(sum(lots), material), ['保管場所', '数量', '期限/管理日'], rows, materialMeta(material));
+    }).join('') || '<div class="empty-row">このカテゴリの現在庫がありません。</div>';
+  }
+
+  function summaryGroup(title, quantity, headers, rows, sub) {
+    return `<article class="inventory-group summary-group">
+      <div class="group-header"><div><h3>${esc(title)}</h3>${sub ? `<div class="stock-sub">${esc(sub)}</div>` : ''}</div><div class="quantity">${esc(quantity)}</div></div>
+      <div class="summary-table-wrap">
+        <table class="summary-table">
+          <thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join('')}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </article>`;
+  }
+
+  function summaryRow(title, sub, quantity, detail) {
+    return `<tr>
+      <td><div class="stock-title">${esc(title)}</div>${sub ? `<div class="stock-sub">${esc(sub)}</div>` : ''}</td>
+      <td class="quantity">${esc(quantity)}</td>
+      <td><div class="stock-meta summary-meta">${detail}</div></td>
+    </tr>`;
+  }
+
+  function expiryChips(lots, material) {
+    const groups = groupBy([...lots].sort(compareLotsForFridge), (lot) => lot.expiration_date);
+    return Array.from(groups.entries()).map(([expirationDate, rowLots]) => {
+      const exp = expiry(expirationDate);
+      return `<span class="date-pill ${exp.className}" title="${esc(exp.label)}">${esc(date(expirationDate))} ${esc(qtyUnit(sum(rowLots), material))}</span>`;
+    }).join('');
+  }
+
   function stockRow(lot, mode) {
     const exp = expiry(lot.expiration_date);
     const material = materialFor(lot);
-    const title = mode === 'fridge' ? materialName(material) : lot.fridge ? lot.fridge.name : '保管場所不明';
+    const title = mode === 'fridge' ? materialName(material) : fridgeName(fridgeFor(lot));
     const sub = mode === 'fridge' ? materialMeta(material) : '';
     return `<div class="stock-row">
       <div>
@@ -842,6 +902,10 @@
   function materialFor(lot) {
     return state.materials.find((item) => item.id === lot.material_id) || lot.material || null;
   }
+  function fridgeFor(lot) {
+    return state.fridges.find((item) => item.id === lot.fridge_id) || lot.fridge || null;
+  }
+  function fridgeName(fridge) { return fridge ? fridge.name : '保管場所不明'; }
   function materialLabel(material) {
     const unit = unitName(material);
     return `${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
@@ -869,7 +933,10 @@
   }
   function sortName(items) { return [...items].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja')); }
   function sortMaterials(items) {
-    return [...items].sort((a, b) => String(a.supplier_name || '').localeCompare(String(b.supplier_name || ''), 'ja') || String(a.material_name || '').localeCompare(String(b.material_name || ''), 'ja'));
+    return [...items].sort(compareMaterials);
+  }
+  function compareMaterials(a, b) {
+    return String(a && a.supplier_name || '').localeCompare(String(b && b.supplier_name || ''), 'ja') || String(a && a.material_name || '').localeCompare(String(b && b.material_name || ''), 'ja');
   }
   function compareLotsForFridge(a, b) { return a.expiration_date.localeCompare(b.expiration_date) || materialName(materialFor(a)).localeCompare(materialName(materialFor(b)), 'ja'); }
   function compareLotsForMaterial(a, b) {

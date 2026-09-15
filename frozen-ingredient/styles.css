@@ -363,11 +363,22 @@ input[readonly] {
 
 .inbound-stock {
   display: grid;
-  gap: 7px;
+  gap: 8px;
 }
 
 .compact-title h2 {
   font-size: 0.98rem;
+}
+
+.stock-summary-block {
+  display: grid;
+  gap: 6px;
+}
+
+.stock-summary-block > h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .segmented {
@@ -483,11 +494,44 @@ input[readonly] {
   border-bottom: 0;
 }
 
+.summary-table-wrap {
+  overflow-x: auto;
+}
+
+.summary-table {
+  width: 100%;
+  min-width: 410px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.summary-table th,
+.summary-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.summary-table th {
+  background: #f4f7f5;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.summary-table tr:last-child td {
+  border-bottom: 0;
+}
+
 .stock-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 5px;
+}
+
+.summary-meta {
+  margin-top: 0;
 }
 
 .date-pill,
