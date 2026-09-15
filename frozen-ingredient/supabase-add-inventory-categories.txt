@@ -126,6 +126,23 @@ with check (true);
 grant usage on schema public to anon;
 grant select, insert, update on public.inventory_item_categories to anon;
 
+do $$
+begin
+  if to_regclass('business_private.apps') is not null then
+    execute $sql$update business_private.apps
+                set app_name = '資材在庫管理'
+              where app_id = 'frozen_ingredients'$sql$;
+  end if;
+
+  if to_regprocedure('business_private.frozen_write_guard()') is not null then
+    execute $sql$drop trigger if exists business_frozen_categories_write_guard
+              on public.inventory_item_categories$sql$;
+    execute $sql$create trigger business_frozen_categories_write_guard
+              before insert or update or delete on public.inventory_item_categories
+              for each row execute function business_private.frozen_write_guard('admin')$sql$;
+  end if;
+end $$;
+
 comment on table public.inventory_item_categories is '共通: 在庫カテゴリマスタ';
 comment on column public.inventory_item_categories.name is 'ダンボール、カップ、シール、冷食など';
 comment on column public.frozen_ingredient_materials.category_id is '在庫カテゴリ';

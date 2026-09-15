@@ -12,7 +12,7 @@ create table if not exists public.workers (
 );
 
 comment on table public.workers is '共通: 作業者マスタ';
-comment on column public.workers.note is 'PIN:1234 のように書くとアプリログインに使用されます';
+comment on column public.workers.note is '旧方式のPINメモ欄。共通PIN運用では business_private.users 側を使用します';
 
 create table if not exists public.inventory_item_categories (
   id uuid primary key default gen_random_uuid(),
@@ -510,3 +510,20 @@ grant select on public.frozen_ingredient_stock_lots to anon;
 grant select on public.frozen_ingredient_stock_movements to anon;
 grant execute on function public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text) to anon;
 grant execute on function public.frozen_ingredient_record_outbound(text, uuid, numeric, text) to anon;
+
+do $$
+begin
+  if to_regclass('business_private.apps') is not null then
+    execute $sql$update business_private.apps
+                set app_name = '資材在庫管理'
+              where app_id = 'frozen_ingredients'$sql$;
+  end if;
+
+  if to_regprocedure('business_private.frozen_write_guard()') is not null then
+    execute $sql$drop trigger if exists business_frozen_categories_write_guard
+              on public.inventory_item_categories$sql$;
+    execute $sql$create trigger business_frozen_categories_write_guard
+              before insert or update or delete on public.inventory_item_categories
+              for each row execute function business_private.frozen_write_guard('admin')$sql$;
+  end if;
+end $$;

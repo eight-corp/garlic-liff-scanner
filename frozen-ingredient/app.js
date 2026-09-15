@@ -2,6 +2,7 @@
   'use strict';
 
   const CONFIG_KEY = 'reishoku.supabase.config.v1';
+  const APP_ID = 'frozen_ingredients';
   const TAB_KEY = 'reishoku.active.tab.v1';
   const CATEGORY_KEY = 'reishoku.active.category.v1';
   const WORKER_KEY = 'reishoku.workerId';
@@ -28,6 +29,9 @@
   };
   const state = {
     client: null,
+    commonAuth: null,
+    commonMode: false,
+    commonSession: null,
     loggedIn: false,
     workerId: getStore(WORKER_KEY) || '',
     activeCategoryId: getStore(CATEGORY_KEY) || '',
@@ -83,6 +87,11 @@
       renderAll();
     });
     el.workerSelect.addEventListener('change', () => {
+      if (state.commonMode) {
+        el.workerSelect.value = state.workerId;
+        toast('作業者を変更する場合は、ログアウトして選び直してください。');
+        return;
+      }
       const worker = activeWorkers().find((item) => item.workerId === el.workerSelect.value);
       if (!worker) return;
       state.workerId = worker.workerId;
@@ -129,12 +138,57 @@
 
   async function connect(config) {
     if (!window.supabase || !window.supabase.createClient) throw new Error('Supabase client library was not loaded.');
-    state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    state.commonAuth = initCommonAuth(config);
+    state.commonMode = state.commonAuth ? await state.commonAuth.mode(APP_ID) : false;
+    state.client = window.supabase.createClient(
+      config.supabaseUrl,
+      config.supabaseAnonKey,
+      state.commonAuth ? { global: { fetch: state.commonAuth.authorizedFetch } } : undefined
+    );
     status('接続中', true);
+    if (state.commonMode) {
+      await loadCommonLoginUsers();
+      const session = await state.commonAuth.session();
+      if (validCommonSession(session)) return unlockCommon(session);
+      showAuth('共通PINでログインしてください。');
+      status('未ログイン');
+      return;
+    }
     await loadWorkers();
     if (restoreLogin()) return unlock();
     showAuth('ログインしてください。');
     status('未ログイン');
+  }
+
+  function initCommonAuth(config) {
+    if (!window.BusinessAuth) return null;
+    const commonConfig = window.BusinessConfig || {};
+    const url = commonConfig.url || config.supabaseUrl;
+    const key = commonConfig.key || config.supabaseAnonKey;
+    window.BusinessAuth.init(url, key);
+    return window.BusinessAuth;
+  }
+
+  async function loadCommonLoginUsers() {
+    const users = await state.commonAuth.users(APP_ID);
+    state.workers = (users || []).map(mapCommonWorker);
+    renderWorkers();
+    if (!state.workers.length) showAuth('資材在庫の利用権限がある作業者が未登録です。');
+  }
+
+  function validCommonSession(session) {
+    return Boolean(session && session.ok !== false && state.commonAuth.allows(session, APP_ID, 'viewer'));
+  }
+
+  async function unlockCommon(session) {
+    state.commonSession = session;
+    state.workerId = session.workerId;
+    setStore(WORKER_KEY, session.workerId);
+    removeStore(LOGIN_KEY);
+    if (!state.workers.some((worker) => worker.workerId === session.workerId)) {
+      state.workers.push(mapCommonWorker(session, state.workers.length));
+    }
+    await unlock();
   }
 
   async function loadWorkers() {
@@ -150,10 +204,32 @@
   }
 
   async function login() {
+    el.loginMessage.textContent = '';
+    try {
+      if (state.commonMode) return await loginCommon();
+      return await loginLegacy();
+    } catch (error) {
+      el.loginMessage.textContent = message(error);
+    }
+  }
+
+  async function loginCommon() {
+    const worker = activeWorkers().find((item) => item.workerId === el.loginWorkerSelect.value);
+    if (!worker) return showAuth('作業者を選択してください。');
+    const session = await state.commonAuth.login(worker.workerId, el.loginPin.value, APP_ID);
+    if (!validCommonSession(session)) {
+      el.loginMessage.textContent = '資材在庫の利用権限がありません。';
+      return;
+    }
+    el.loginPin.value = '';
+    await unlockCommon(session);
+  }
+
+  async function loginLegacy() {
     const worker = activeWorkers().find((item) => item.workerId === el.loginWorkerSelect.value);
     if (!worker) return showAuth('作業者を選択してください。');
     const pin = workerPin(worker);
-    if (!pin) return el.loginMessage.textContent = 'この作業者にはPINが設定されていません。作業者マスタの備考に「PIN: 数字」を設定してください。';
+    if (!pin) return el.loginMessage.textContent = '旧方式のPINが未設定です。共通PINで運用する場合は共通認証SQLと権限設定を確認してください。';
     if (clean(el.loginPin.value) !== pin) return el.loginMessage.textContent = 'PINが違います。';
     state.workerId = worker.workerId;
     saveLogin(worker);
@@ -177,11 +253,18 @@
   }
 
   async function signOut() {
+    if (state.commonMode && state.commonAuth) {
+      try { await state.commonAuth.logout(); } catch (_error) {}
+    }
     removeStore(LOGIN_KEY);
     removeStore(WORKER_KEY);
+    state.commonSession = null;
     state.loggedIn = false;
     state.workerId = '';
     state.lots = [];
+    if (state.commonMode && state.commonAuth) {
+      try { await loadCommonLoginUsers(); } catch (_error) {}
+    }
     showAuth('ログアウトしました。');
     status('未ログイン');
   }
@@ -196,8 +279,11 @@
   async function loadData(options) {
     if (!state.client || !state.loggedIn) return;
     if (!options || !options.silent) status('更新中', true);
+    const workersQuery = state.commonMode
+      ? commonWorkersResult()
+      : state.client.from('workers').select('worker_id, worker_name, role, display_order, active, note').order('display_order', { ascending: true }).order('worker_id', { ascending: true });
     const [workers, categories, fridges, materials, lots] = await Promise.all([
-      state.client.from('workers').select('worker_id, worker_name, role, display_order, active, note').order('display_order', { ascending: true }).order('worker_id', { ascending: true }),
+      workersQuery,
       state.client.from('inventory_item_categories').select('*').order('display_order', { ascending: true }).order('name', { ascending: true }),
       state.client.from('frozen_ingredient_fridges').select('*').order('name', { ascending: true }),
       state.client.from('frozen_ingredient_materials').select('*').order('supplier_name', { ascending: true }).order('material_name', { ascending: true }),
@@ -212,7 +298,7 @@
       status('更新失敗');
       return toast(message(error), 'error');
     }
-    state.workers = (workers.data || []).map(mapWorker);
+    state.workers = state.commonMode ? (workers.data || []).map(mapCommonWorker) : (workers.data || []).map(mapWorker);
     state.categories = categories.data || [];
     if (!activeWorkers().some((worker) => worker.workerId === state.workerId)) {
       await signOut();
@@ -226,8 +312,17 @@
     status(`更新済み ${time(new Date())}`);
   }
 
+  async function commonWorkersResult() {
+    try {
+      return { data: await state.commonAuth.users(APP_ID), error: null };
+    } catch (error) {
+      return { data: null, error };
+    }
+  }
+
   async function inbound(event) {
     event.preventDefault();
+    if (!canUse('operator')) return toast('入出庫は作業者以上の権限が必要です。', 'error');
     const payload = {
       p_worker_id: state.workerId,
       p_fridge_id: el.inboundFridge.value,
@@ -248,6 +343,7 @@
 
   async function outbound(event) {
     event.preventDefault();
+    if (!canUse('operator')) return toast('入出庫は作業者以上の権限が必要です。', 'error');
     const quantity = Number(el.outboundQuantity.value);
     if (!state.selectedLotId || quantity <= 0) return toast('出庫する在庫と数量を確認してください。', 'error');
     await runForm(el.outboundForm, '出庫登録中', async () => {
@@ -281,6 +377,7 @@
 
   async function saveCategory(event) {
     event.preventDefault();
+    if (!canUse('admin')) return toast('マスタ管理は管理者権限が必要です。', 'error');
     const id = el.categoryId.value;
     const values = {
       name: clean(el.categoryName.value),
@@ -301,6 +398,7 @@
 
   async function saveFridge(event) {
     event.preventDefault();
+    if (!canUse('admin')) return toast('マスタ管理は管理者権限が必要です。', 'error');
     const id = el.fridgeId.value;
     const values = { name: clean(el.fridgeName.value), note: clean(el.fridgeNote.value) || null, is_active: el.fridgeActive.checked };
     if (!values.name) return;
@@ -316,6 +414,7 @@
 
   async function saveMaterial(event) {
     event.preventDefault();
+    if (!canUse('admin')) return toast('マスタ管理は管理者権限が必要です。', 'error');
     const id = el.materialId.value;
     const values = {
       category_id: el.materialCategory.value || state.activeCategoryId,
@@ -507,8 +606,19 @@
 
   function renderWorkers() {
     const workers = activeWorkers();
+    if (state.commonMode) {
+      fillWorker(el.loginWorkerSelect, workers, '資材在庫の利用権限がある作業者が未登録です');
+      if (state.commonSession) {
+        const current = workers.find((worker) => worker.workerId === state.workerId) || mapCommonWorker(state.commonSession, 0);
+        fillWorker(el.workerSelect, [current], '作業者なし');
+        el.workerSelect.value = state.workerId;
+        el.workerSelect.disabled = true;
+      }
+      return;
+    }
     fillWorker(el.loginWorkerSelect, workers, '作業者が未登録です');
     fillWorker(el.workerSelect, workers, '作業者なし');
+    el.workerSelect.disabled = false;
     if (state.workerId && workers.some((worker) => worker.workerId === state.workerId)) {
       el.loginWorkerSelect.value = state.workerId;
       el.workerSelect.value = state.workerId;
@@ -634,6 +744,12 @@
   function readConfig() {
     const stored = getJson(CONFIG_KEY);
     if (configured(stored)) return stored;
+    if (window.BusinessConfig && window.BusinessConfig.url && window.BusinessConfig.key) {
+      return {
+        supabaseUrl: window.BusinessConfig.url,
+        supabaseAnonKey: window.BusinessConfig.key
+      };
+    }
     return {
       supabaseUrl: window.APP_CONFIG && window.APP_CONFIG.supabaseUrl ? window.APP_CONFIG.supabaseUrl : '',
       supabaseAnonKey: window.APP_CONFIG && window.APP_CONFIG.supabaseAnonKey ? window.APP_CONFIG.supabaseAnonKey : ''
@@ -660,12 +776,26 @@
     };
   }
 
+  function mapCommonWorker(row, index) {
+    return {
+      workerId: row.workerId || row.worker_id || '',
+      workerName: row.workerName || row.worker_name || row.workerId || row.worker_id || '',
+      role: row.role || 'operator',
+      displayOrder: Number(row.displayOrder || row.display_order || index || 999),
+      active: row.active !== false,
+      note: ''
+    };
+  }
+
   function workerPin(worker) {
     const match = clean(worker && worker.note).match(/(?:PIN|pin|ＰＩＮ|暗証番号)\s*[:：=]\s*([0-9A-Za-z_-]+)/);
     return match ? match[1] : '';
   }
 
   function activeWorkers() { return state.workers.filter((worker) => worker.active); }
+  function canUse(level) {
+    return !state.commonMode || state.commonAuth.allows(state.commonSession, APP_ID, level);
+  }
   function ensureCategory() {
     const categories = activeCategories();
     if (!categories.length) {
