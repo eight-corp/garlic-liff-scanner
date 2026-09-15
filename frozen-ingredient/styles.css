@@ -361,6 +361,15 @@ input[readonly] {
   gap: 8px;
 }
 
+.inbound-stock {
+  display: grid;
+  gap: 7px;
+}
+
+.compact-title h2 {
+  font-size: 0.98rem;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

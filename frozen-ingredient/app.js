@@ -11,7 +11,7 @@
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'outboundForm', 'outboundFridge', 'outboundMaterial',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
     'materialInventoryList', 'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
     'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm',
@@ -439,6 +439,7 @@
     renderCategories();
     renderTabs();
     renderSelects();
+    renderInboundInventory();
     renderFridgeInventory();
     renderMaterialInventory();
     renderMasterMode();
@@ -517,9 +518,17 @@
     }).join('') || '<div class="empty-row">在庫がありません。</div>';
   }
 
+  function renderInboundInventory() {
+    el.inboundInventoryList.innerHTML = materialInventoryHtml('このカテゴリの現在庫がありません。');
+  }
+
   function renderMaterialInventory() {
+    el.materialInventoryList.innerHTML = materialInventoryHtml('在庫がありません。');
+  }
+
+  function materialInventoryHtml(emptyLabel) {
     const groups = groupBy(activeLots().sort(compareLotsForMaterial), (lot) => lot.material_id);
-    el.materialInventoryList.innerHTML = sortMaterials(state.materials).map((material) => {
+    return sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => {
       const lots = groups.get(material.id) || [];
       if (!lots.length) return '';
       const rows = lots.map((lot) => stockRow(lot, 'material')).join('');
@@ -527,7 +536,7 @@
         <div class="group-header"><div><h3>${esc(material.material_name)}</h3><div class="stock-sub">${esc(materialMeta(material))}</div></div><div class="quantity">${esc(qtyUnit(sum(lots), material))}</div></div>
         ${rows}
       </article>`;
-    }).join('') || '<div class="empty-row">在庫がありません。</div>';
+    }).join('') || `<div class="empty-row">${esc(emptyLabel)}</div>`;
   }
 
   function stockRow(lot, mode) {
