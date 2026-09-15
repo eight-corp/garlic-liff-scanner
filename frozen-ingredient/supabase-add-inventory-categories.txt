@@ -147,3 +147,5 @@ comment on table public.inventory_item_categories is '共通: 在庫カテゴリ
 comment on column public.inventory_item_categories.name is 'ダンボール、カップ、シール、冷食など';
 comment on column public.frozen_ingredient_materials.category_id is '在庫カテゴリ';
 comment on column public.frozen_ingredient_materials.unit_name is '数量単位';
+
+notify pgrst, 'reload schema';

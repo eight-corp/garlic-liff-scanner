@@ -527,3 +527,5 @@ begin
               for each row execute function business_private.frozen_write_guard('admin')$sql$;
   end if;
 end $$;
+
+notify pgrst, 'reload schema';

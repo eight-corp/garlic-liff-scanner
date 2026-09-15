@@ -918,7 +918,8 @@
     if (text.includes('active fridge not found')) return '使用中の保管場所を選択してください。';
     if (text.includes('active material not found')) return '使用中の品目を選択してください。';
     if (text.includes('duplicate key')) return '同じ内容がすでに登録されています。';
-    if (text.includes('inventory_item_categories') || text.includes('frozen_ingredient_record_inbound')) return 'SupabaseのSQLセットアップを確認してください。';
+    if (text.includes('inventory_item_categories') || text.includes('category_id')) return 'カテゴリ追加SQLが未実行です。supabase-add-inventory-categories.sqlをSupabase SQL Editorで実行してください。';
+    if (text.includes('frozen_ingredient_record_inbound')) return '入出庫RPCのSQLセットアップを確認してください。';
     return text || '処理に失敗しました。';
   }
   function clean(value) { return String(value == null ? '' : value).trim(); }
