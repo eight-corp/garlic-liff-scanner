@@ -14,7 +14,7 @@ https://eight-corp.github.io/garlic-liff-scanner/
 https://eight-corp.github.io/garlic-liff-scanner/supabase/
 ```
 
-## 冷食原料 在庫管理
+## 資材 在庫管理
 
 ```text
 https://eight-corp.github.io/garlic-liff-scanner/frozen-ingredient/

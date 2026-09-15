@@ -291,9 +291,9 @@ input[readonly] {
 }
 
 .status-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(116px, 1.2fr) minmax(86px, 0.8fr);
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 7px 0 8px;
 }
@@ -325,15 +325,16 @@ input[readonly] {
   white-space: nowrap;
 }
 
+.category-switch,
 .worker-switch {
   display: grid;
-  grid-template-columns: auto minmax(108px, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  max-width: 230px;
 }
 
+.category-switch span,
 .worker-switch span {
   color: var(--muted);
   font-size: 0.78rem;
@@ -341,6 +342,7 @@ input[readonly] {
   white-space: nowrap;
 }
 
+.category-switch select,
 .worker-switch select {
   min-height: 32px;
   padding: 4px 7px;
@@ -354,19 +356,6 @@ input[readonly] {
   font-weight: 800;
 }
 
-.button-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  text-decoration: none;
-}
-
-.worker-switch strong {
-  color: var(--text);
-}
-
 .tab-panel {
   display: grid;
   gap: 8px;
@@ -374,7 +363,7 @@ input[readonly] {
 
 .segmented {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
@@ -640,11 +629,16 @@ input[readonly] {
 }
 
 @media (max-width: 430px) {
-  .worker-switch {
-    grid-template-columns: minmax(92px, 1fr);
-    max-width: 138px;
+  .status-row {
+    grid-template-columns: auto minmax(112px, 1fr) minmax(82px, 0.75fr);
   }
 
+  .category-switch,
+  .worker-switch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .category-switch span,
   .worker-switch span {
     display: none;
   }

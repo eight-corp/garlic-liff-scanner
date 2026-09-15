@@ -1,18 +1,22 @@
 (function () {
   'use strict';
 
+  const CONFIG_KEY = 'reishoku.supabase.config.v1';
   const TAB_KEY = 'reishoku.active.tab.v1';
-  const APP_ID = 'frozen_ingredients';
-  const MENU_URL = new URL('../menu.html?openExternalBrowser=1', window.location.href).href;
+  const CATEGORY_KEY = 'reishoku.active.category.v1';
+  const WORKER_KEY = 'reishoku.workerId';
+  const LOGIN_KEY = 'reishoku.login.v1';
   const ids = [
-    'authScreen', 'appShell', 'loginMessage', 'homeButton', 'refreshButton', 'signOutButton',
-    'syncStatus', 'currentRole', 'currentUser',
-    'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
+    'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
+    'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
+    'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
     'inboundQuantity', 'inboundUnit', 'inboundNote', 'outboundForm', 'outboundFridge', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
-    'materialInventoryList', 'fridgeMasterPanel', 'materialMasterPanel', 'fridgeForm', 'fridgeId',
+    'materialInventoryList', 'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
+    'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm',
+    'categoryMasterList', 'fridgeForm', 'fridgeId',
     'fridgeName', 'fridgeNote', 'fridgeActive', 'clearFridgeForm', 'fridgeMasterList', 'materialForm',
-    'materialId', 'supplierName', 'materialName', 'materialUnit', 'materialActive', 'clearMaterialForm',
+    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialActive', 'clearMaterialForm',
     'materialMasterList', 'toast'
   ];
   const panels = {
@@ -25,12 +29,13 @@
   const state = {
     client: null,
     loggedIn: false,
-    workerId: '',
-    session: null,
-    role: '',
+    workerId: getStore(WORKER_KEY) || '',
+    activeCategoryId: getStore(CATEGORY_KEY) || '',
     activeTab: getStore(TAB_KEY) || 'inbound',
-    masterMode: 'fridges',
+    masterMode: 'categories',
     selectedLotId: '',
+    workers: [],
+    categories: [],
     fridges: [],
     materials: [],
     lots: []
@@ -44,19 +49,46 @@
     bind();
     icons();
     const config = readConfig();
-    if (!configured(config)) return showAuth('本番Supabaseの接続設定を読み込めませんでした。');
+    fillSetup(config);
+    if (!configured(config)) return showSetup();
     try {
       await connect(config);
     } catch (error) {
-      showAuth(message(error));
+      showSetup();
       toast(message(error), 'error');
     }
   }
 
   function bind() {
-    el.homeButton.addEventListener('click', returnToMenu);
+    el.setupForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const config = {
+        supabaseUrl: el.setupUrl.value.trim(),
+        supabaseAnonKey: el.setupAnonKey.value.trim()
+      };
+      if (!configured(config)) return toast('Supabaseの接続情報を入力してください。', 'error');
+      setJson(CONFIG_KEY, config);
+      await connect(config);
+    });
+    el.authForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await login();
+    });
     el.refreshButton.addEventListener('click', () => loadData());
     el.signOutButton.addEventListener('click', signOut);
+    el.categorySelect.addEventListener('change', () => {
+      state.activeCategoryId = el.categorySelect.value;
+      setStore(CATEGORY_KEY, state.activeCategoryId);
+      state.selectedLotId = '';
+      renderAll();
+    });
+    el.workerSelect.addEventListener('change', () => {
+      const worker = activeWorkers().find((item) => item.workerId === el.workerSelect.value);
+      if (!worker) return;
+      state.workerId = worker.workerId;
+      saveLogin(worker);
+      renderWorkers();
+    });
     el.inboundForm.addEventListener('submit', inbound);
     el.inboundMaterial.addEventListener('change', renderUnits);
     el.outboundForm.addEventListener('submit', outbound);
@@ -75,10 +107,13 @@
       state.selectedLotId = button.dataset.lotId;
       renderOutboundLots();
     });
+    el.categoryForm.addEventListener('submit', saveCategory);
     el.fridgeForm.addEventListener('submit', saveFridge);
     el.materialForm.addEventListener('submit', saveMaterial);
+    el.clearCategoryForm.addEventListener('click', resetCategoryForm);
     el.clearFridgeForm.addEventListener('click', resetFridgeForm);
     el.clearMaterialForm.addEventListener('click', resetMaterialForm);
+    el.categoryMasterList.addEventListener('click', editCategory);
     el.fridgeMasterList.addEventListener('click', editFridge);
     el.materialMasterList.addEventListener('click', editMaterial);
     document.querySelectorAll('[data-tab]').forEach((button) => {
@@ -94,60 +129,105 @@
 
   async function connect(config) {
     if (!window.supabase || !window.supabase.createClient) throw new Error('Supabase client library was not loaded.');
-    if (!window.BusinessAuth) throw new Error('共通認証を読み込めませんでした。');
-    window.BusinessAuth.init(config.supabaseUrl, config.supabaseAnonKey);
-    state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      global: { fetch: window.BusinessAuth.authorizedFetch }
-    });
+    state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
     status('接続中', true);
-    const session = await window.BusinessAuth.session();
-    if (!window.BusinessAuth.allows(session, APP_ID, 'viewer')) {
-      showAuth('業務管理メニューでログインしてください。');
-      window.location.replace(MENU_URL);
-      return;
-    }
-    state.session = session;
-    state.workerId = session.workerId;
-    state.role = session.permissions[APP_ID];
-    state.loggedIn = true;
-    showApp();
-    renderAccess();
-    await loadData();
+    await loadWorkers();
+    if (restoreLogin()) return unlock();
+    showAuth('ログインしてください。');
+    status('未ログイン');
+  }
+
+  async function loadWorkers() {
+    const { data, error } = await state.client
+      .from('workers')
+      .select('worker_id, worker_name, role, display_order, active, note')
+      .order('display_order', { ascending: true })
+      .order('worker_id', { ascending: true });
+    if (error) throw error;
+    state.workers = (data || []).map(mapWorker);
+    renderWorkers();
+    if (!state.workers.length) showAuth('作業者マスタが未登録です。');
+  }
+
+  async function login() {
+    const worker = activeWorkers().find((item) => item.workerId === el.loginWorkerSelect.value);
+    if (!worker) return showAuth('作業者を選択してください。');
+    const pin = workerPin(worker);
+    if (!pin) return el.loginMessage.textContent = 'この作業者にはPINが設定されていません。作業者マスタの備考に「PIN: 数字」を設定してください。';
+    if (clean(el.loginPin.value) !== pin) return el.loginMessage.textContent = 'PINが違います。';
+    state.workerId = worker.workerId;
+    saveLogin(worker);
+    el.loginPin.value = '';
+    await unlock();
+  }
+
+  function saveLogin(worker) {
+    setStore(WORKER_KEY, worker.workerId);
+    setJson(LOGIN_KEY, { workerId: worker.workerId, workerName: worker.workerName, loggedInAt: new Date().toISOString() });
+  }
+
+  function restoreLogin() {
+    const saved = getJson(LOGIN_KEY);
+    if (!saved || !saved.workerId) return false;
+    const worker = activeWorkers().find((item) => item.workerId === saved.workerId);
+    if (!worker) return false;
+    state.workerId = worker.workerId;
+    setStore(WORKER_KEY, worker.workerId);
+    return true;
   }
 
   async function signOut() {
-    try { await window.BusinessAuth.logout(); } finally { window.location.replace(MENU_URL); }
+    removeStore(LOGIN_KEY);
+    removeStore(WORKER_KEY);
+    state.loggedIn = false;
+    state.workerId = '';
+    state.lots = [];
+    showAuth('ログアウトしました。');
+    status('未ログイン');
   }
 
-  function returnToMenu() { window.location.href = MENU_URL; }
+  async function unlock() {
+    state.loggedIn = true;
+    showApp();
+    renderWorkers();
+    await loadData();
+  }
 
   async function loadData(options) {
     if (!state.client || !state.loggedIn) return;
     if (!options || !options.silent) status('更新中', true);
-    const [fridges, materials, lots] = await Promise.all([
+    const [workers, categories, fridges, materials, lots] = await Promise.all([
+      state.client.from('workers').select('worker_id, worker_name, role, display_order, active, note').order('display_order', { ascending: true }).order('worker_id', { ascending: true }),
+      state.client.from('inventory_item_categories').select('*').order('display_order', { ascending: true }).order('name', { ascending: true }),
       state.client.from('frozen_ingredient_fridges').select('*').order('name', { ascending: true }),
       state.client.from('frozen_ingredient_materials').select('*').order('supplier_name', { ascending: true }).order('material_name', { ascending: true }),
       state.client
         .from('frozen_ingredient_stock_lots')
-        .select('id, fridge_id, material_id, expiration_date, quantity, received_at, updated_at, fridge:frozen_ingredient_fridges(id, name, is_active), material:frozen_ingredient_materials(id, supplier_name, material_name, is_active)')
+        .select('id, fridge_id, material_id, expiration_date, quantity, received_at, updated_at, fridge:frozen_ingredient_fridges(id, name, is_active), material:frozen_ingredient_materials(id, category_id, supplier_name, material_name, unit_name, is_active)')
         .gt('quantity', 0)
         .order('expiration_date', { ascending: true })
     ]);
-    const error = fridges.error || materials.error || lots.error;
+    const error = workers.error || categories.error || fridges.error || materials.error || lots.error;
     if (error) {
       status('更新失敗');
       return toast(message(error), 'error');
     }
+    state.workers = (workers.data || []).map(mapWorker);
+    state.categories = categories.data || [];
+    if (!activeWorkers().some((worker) => worker.workerId === state.workerId)) {
+      await signOut();
+      return showAuth('作業者が無効になりました。再ログインしてください。');
+    }
     state.fridges = fridges.data || [];
     state.materials = materials.data || [];
     state.lots = (lots.data || []).map((lot) => ({ ...lot, quantity: Number(lot.quantity || 0) }));
+    ensureCategory();
     renderAll();
     status(`更新済み ${time(new Date())}`);
   }
 
   async function inbound(event) {
     event.preventDefault();
-    if (!can('operator')) return toast('入庫操作の権限がありません。', 'error');
     const payload = {
       p_worker_id: state.workerId,
       p_fridge_id: el.inboundFridge.value,
@@ -168,7 +248,6 @@
 
   async function outbound(event) {
     event.preventDefault();
-    if (!can('operator')) return toast('出庫操作の権限がありません。', 'error');
     const quantity = Number(el.outboundQuantity.value);
     if (!state.selectedLotId || quantity <= 0) return toast('出庫する在庫と数量を確認してください。', 'error');
     await runForm(el.outboundForm, '出庫登録中', async () => {
@@ -200,9 +279,28 @@
     }
   }
 
+  async function saveCategory(event) {
+    event.preventDefault();
+    const id = el.categoryId.value;
+    const values = {
+      name: clean(el.categoryName.value),
+      display_order: Number(el.categoryDisplayOrder.value || 999),
+      is_active: el.categoryActive.checked
+    };
+    if (!values.name) return;
+    if (excludedCategory(values.name)) return toast('にんにく、黒にんにく、米穀は別システムで管理します。', 'error');
+    const query = id
+      ? state.client.from('inventory_item_categories').update(values).eq('id', id)
+      : state.client.from('inventory_item_categories').insert(values);
+    const { error } = await query;
+    if (error) return toast(message(error), 'error');
+    resetCategoryForm();
+    toast('カテゴリを保存しました。');
+    await loadData({ silent: true });
+  }
+
   async function saveFridge(event) {
     event.preventDefault();
-    if (!can('admin')) return toast('マスタ管理の権限がありません。', 'error');
     const id = el.fridgeId.value;
     const values = { name: clean(el.fridgeName.value), note: clean(el.fridgeNote.value) || null, is_active: el.fridgeActive.checked };
     if (!values.name) return;
@@ -212,32 +310,34 @@
     const { error } = await query;
     if (error) return toast(message(error), 'error');
     resetFridgeForm();
-    toast('冷蔵庫を保存しました。');
+    toast('保管場所を保存しました。');
     await loadData({ silent: true });
   }
 
   async function saveMaterial(event) {
     event.preventDefault();
-    if (!can('admin')) return toast('マスタ管理の権限がありません。', 'error');
     const id = el.materialId.value;
     const values = {
+      category_id: el.materialCategory.value || state.activeCategoryId,
       supplier_name: clean(el.supplierName.value),
       material_name: clean(el.materialName.value),
       unit_name: clean(el.materialUnit.value),
       is_active: el.materialActive.checked
     };
-    if (!values.supplier_name || !values.material_name || !values.unit_name) return;
+    if (!values.category_id || !values.supplier_name || !values.material_name || !values.unit_name) return toast('品目内容を確認してください。', 'error');
     const query = id
       ? state.client.from('frozen_ingredient_materials').update(values).eq('id', id)
       : state.client.from('frozen_ingredient_materials').insert(values);
     const { error } = await query;
     if (error) return toast(message(error), 'error');
     resetMaterialForm();
-    toast('原料を保存しました。');
+    toast('品目を保存しました。');
     await loadData({ silent: true });
   }
 
   function renderAll() {
+    renderWorkers();
+    renderCategories();
     renderTabs();
     renderSelects();
     renderFridgeInventory();
@@ -249,19 +349,13 @@
   }
 
   function renderTabs() {
-    const permittedTabs = Object.keys(panels).filter(tabAllowed);
-    if (!permittedTabs.includes(state.activeTab)) state.activeTab = can('operator') ? 'inbound' : 'fridges';
-    document.querySelectorAll('[data-tab]').forEach((button) => {
-      button.hidden = !tabAllowed(button.dataset.tab);
-      button.classList.toggle('active', button.dataset.tab === state.activeTab);
-    });
-    document.querySelector('.bottom-tabs').style.gridTemplateColumns = `repeat(${permittedTabs.length}, minmax(0, 1fr))`;
+    if (!panels[state.activeTab]) state.activeTab = 'inbound';
+    document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('active', button.dataset.tab === state.activeTab));
     Object.entries(panels).forEach(([tab, id]) => document.getElementById(id).classList.toggle('hidden', tab !== state.activeTab));
   }
 
   function setTab(tab) {
-    if (!tabAllowed(tab)) return;
-    state.activeTab = tab;
+    state.activeTab = panels[tab] ? tab : 'inbound';
     setStore(TAB_KEY, state.activeTab);
     renderTabs();
     if (state.activeTab === 'outbound') renderOutboundLots();
@@ -270,9 +364,9 @@
 
   function renderSelects() {
     const activeFridges = sortName(state.fridges.filter((item) => item.is_active));
-    const activeMaterials = sortMaterials(state.materials.filter((item) => item.is_active));
-    fillSelect(el.inboundFridge, activeFridges, (item) => item.name, '冷蔵庫が未登録です');
-    fillSelect(el.inboundMaterial, activeMaterials, materialLabel, '原料が未登録です');
+    const activeMaterials = sortMaterials(state.materials.filter((item) => item.is_active && inCurrentCategory(item)));
+    fillSelect(el.inboundFridge, activeFridges, (item) => item.name, '保管場所が未登録です');
+    fillSelect(el.inboundMaterial, activeMaterials, materialLabel, 'このカテゴリの品目が未登録です');
     const fridgeIds = new Set(activeLots().map((lot) => lot.fridge_id));
     fillSelect(el.outboundFridge, sortName(state.fridges.filter((item) => fridgeIds.has(item.id))), (item) => item.name, '出庫できる在庫がありません');
     renderOutboundMaterials();
@@ -282,7 +376,7 @@
   function renderOutboundMaterials() {
     const fridgeId = el.outboundFridge.value;
     const ids = new Set(activeLots().filter((lot) => lot.fridge_id === fridgeId).map((lot) => lot.material_id));
-    fillSelect(el.outboundMaterial, sortMaterials(state.materials.filter((item) => ids.has(item.id))), materialLabel, 'この冷蔵庫に在庫がありません');
+    fillSelect(el.outboundMaterial, sortMaterials(state.materials.filter((item) => ids.has(item.id))), materialLabel, 'この保管場所に在庫がありません');
     renderOutboundLots();
     renderUnits();
   }
@@ -340,7 +434,7 @@
   function stockRow(lot, mode) {
     const exp = expiry(lot.expiration_date);
     const material = materialFor(lot);
-    const title = mode === 'fridge' ? materialName(material) : lot.fridge ? lot.fridge.name : '冷蔵庫不明';
+    const title = mode === 'fridge' ? materialName(material) : lot.fridge ? lot.fridge.name : '保管場所不明';
     const sub = mode === 'fridge' ? materialMeta(material) : '';
     return `<div class="stock-row">
       <div>
@@ -352,15 +446,56 @@
     </div>`;
   }
 
+  function renderCategories() {
+    const categories = activeCategories();
+    const previous = state.activeCategoryId || el.categorySelect.value;
+    el.categorySelect.innerHTML = '';
+    if (!categories.length) {
+      const option = new Option('カテゴリ未登録', '');
+      option.disabled = true;
+      option.selected = true;
+      el.categorySelect.append(option);
+      el.categorySelect.disabled = true;
+      fillMaterialCategory([]);
+      return;
+    }
+    if (!categories.some((category) => category.id === previous)) {
+      state.activeCategoryId = preferredCategoryId(categories);
+      setStore(CATEGORY_KEY, state.activeCategoryId);
+    }
+    el.categorySelect.disabled = false;
+    categories.forEach((category) => el.categorySelect.append(new Option(category.name, category.id)));
+    el.categorySelect.value = state.activeCategoryId;
+    fillMaterialCategory(categories);
+  }
+
+  function fillMaterialCategory(categories) {
+    const previous = el.materialCategory.value || state.activeCategoryId;
+    el.materialCategory.innerHTML = '';
+    if (!categories.length) {
+      const option = new Option('カテゴリ未登録', '');
+      option.disabled = true;
+      option.selected = true;
+      el.materialCategory.append(option);
+      el.materialCategory.disabled = true;
+      return;
+    }
+    el.materialCategory.disabled = false;
+    categories.forEach((category) => el.materialCategory.append(new Option(category.name, category.id)));
+    el.materialCategory.value = categories.some((category) => category.id === previous) ? previous : categories[0].id;
+  }
+
   function renderMasterMode() {
     document.querySelectorAll('[data-master-mode]').forEach((button) => button.classList.toggle('active', button.dataset.masterMode === state.masterMode));
+    el.categoryMasterPanel.classList.toggle('hidden', state.masterMode !== 'categories');
     el.fridgeMasterPanel.classList.toggle('hidden', state.masterMode !== 'fridges');
     el.materialMasterPanel.classList.toggle('hidden', state.masterMode !== 'materials');
   }
 
   function renderMasterLists() {
-    el.fridgeMasterList.innerHTML = sortName(state.fridges).map((fridge) => masterItem(fridge.name, fridge.note, fridge.is_active, 'fridge', fridge.id)).join('') || '<div class="empty-row">冷蔵庫が未登録です。</div>';
-    el.materialMasterList.innerHTML = sortMaterials(state.materials).map((material) => masterItem(material.material_name, materialMeta(material), material.is_active, 'material', material.id)).join('') || '<div class="empty-row">原料が未登録です。</div>';
+    el.categoryMasterList.innerHTML = sortCategories(state.categories).map((category) => masterItem(category.name, `表示順 ${category.display_order || 999}`, category.is_active, 'category', category.id)).join('') || '<div class="empty-row">カテゴリが未登録です。</div>';
+    el.fridgeMasterList.innerHTML = sortName(state.fridges).map((fridge) => masterItem(fridge.name, fridge.note, fridge.is_active, 'fridge', fridge.id)).join('') || '<div class="empty-row">保管場所が未登録です。</div>';
+    el.materialMasterList.innerHTML = sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => masterItem(material.material_name, materialMeta(material), material.is_active, 'material', material.id)).join('') || '<div class="empty-row">このカテゴリの品目が未登録です。</div>';
   }
 
   function masterItem(title, sub, active, kind, id) {
@@ -368,6 +503,16 @@
       <div class="master-main"><div><div class="master-title">${esc(title)}</div><div class="master-sub">${esc(sub || '')}</div></div></div>
       <div class="master-actions"><span class="state-pill ${active ? 'active' : 'paused'}">${active ? '使用中' : '停止中'}</span><button class="icon-button" type="button" data-edit-${kind}="${esc(id)}" aria-label="編集" title="編集"><i data-lucide="pencil"></i></button></div>
     </div>`;
+  }
+
+  function renderWorkers() {
+    const workers = activeWorkers();
+    fillWorker(el.loginWorkerSelect, workers, '作業者が未登録です');
+    fillWorker(el.workerSelect, workers, '作業者なし');
+    if (state.workerId && workers.some((worker) => worker.workerId === state.workerId)) {
+      el.loginWorkerSelect.value = state.workerId;
+      el.workerSelect.value = state.workerId;
+    }
   }
 
   function fillSelect(select, rows, label, emptyLabel) {
@@ -384,6 +529,34 @@
     select.disabled = false;
     rows.forEach((row) => select.append(new Option(label(row), row.id)));
     if (rows.some((row) => row.id === previous)) select.value = previous;
+  }
+
+  function fillWorker(select, rows, emptyLabel) {
+    const previous = select.value;
+    select.innerHTML = '';
+    if (!rows.length) {
+      const option = new Option(emptyLabel, '');
+      option.disabled = true;
+      option.selected = true;
+      select.append(option);
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    rows.forEach((worker) => select.append(new Option(worker.workerName, worker.workerId)));
+    if (rows.some((worker) => worker.workerId === previous)) select.value = previous;
+  }
+
+  function editCategory(event) {
+    const button = event.target.closest('[data-edit-category]');
+    if (!button) return;
+    const category = state.categories.find((item) => item.id === button.dataset.editCategory);
+    if (!category) return;
+    el.categoryId.value = category.id;
+    el.categoryName.value = category.name || '';
+    el.categoryDisplayOrder.value = category.display_order || 999;
+    el.categoryActive.checked = Boolean(category.is_active);
+    el.categoryName.focus();
   }
 
   function editFridge(event) {
@@ -404,11 +577,19 @@
     const material = state.materials.find((item) => item.id === button.dataset.editMaterial);
     if (!material) return;
     el.materialId.value = material.id;
+    el.materialCategory.value = material.category_id || state.activeCategoryId;
     el.supplierName.value = material.supplier_name || '';
     el.materialName.value = material.material_name || '';
     el.materialUnit.value = material.unit_name || 'kg';
     el.materialActive.checked = Boolean(material.is_active);
     el.supplierName.focus();
+  }
+
+  function resetCategoryForm() {
+    el.categoryId.value = '';
+    el.categoryName.value = '';
+    el.categoryDisplayOrder.value = '999';
+    el.categoryActive.checked = true;
   }
 
   function resetFridgeForm() {
@@ -420,50 +601,99 @@
 
   function resetMaterialForm() {
     el.materialId.value = '';
+    el.materialCategory.value = state.activeCategoryId || '';
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = 'kg';
     el.materialActive.checked = true;
   }
 
+  function showSetup() {
+    el.setupScreen.classList.remove('hidden');
+    el.authScreen.classList.add('hidden');
+    el.appShell.classList.add('hidden');
+    icons();
+  }
+
   function showAuth(text) {
+    el.setupScreen.classList.add('hidden');
     el.authScreen.classList.remove('hidden');
     el.appShell.classList.add('hidden');
     el.loginMessage.textContent = text || '';
+    renderWorkers();
     icons();
   }
 
   function showApp() {
+    el.setupScreen.classList.add('hidden');
     el.authScreen.classList.add('hidden');
     el.appShell.classList.remove('hidden');
     renderTabs();
   }
 
   function readConfig() {
+    const stored = getJson(CONFIG_KEY);
+    if (configured(stored)) return stored;
     return {
       supabaseUrl: window.APP_CONFIG && window.APP_CONFIG.supabaseUrl ? window.APP_CONFIG.supabaseUrl : '',
       supabaseAnonKey: window.APP_CONFIG && window.APP_CONFIG.supabaseAnonKey ? window.APP_CONFIG.supabaseAnonKey : ''
     };
   }
 
+  function fillSetup(config) {
+    el.setupUrl.value = config.supabaseUrl || '';
+    el.setupAnonKey.value = config.supabaseAnonKey || '';
+  }
+
   function configured(config) {
     return Boolean(config && config.supabaseUrl && config.supabaseAnonKey && !String(config.supabaseUrl).includes('YOUR-') && !String(config.supabaseAnonKey).includes('YOUR-'));
   }
 
-  function can(minimum) { return window.BusinessAuth.allows(state.session, APP_ID, minimum); }
-  function tabAllowed(tab) {
-    if (!panels[tab]) return false;
-    if (tab === 'master') return can('admin');
-    if (tab === 'inbound' || tab === 'outbound') return can('operator');
-    return can('viewer');
+  function mapWorker(row) {
+    return {
+      workerId: row.worker_id || '',
+      workerName: row.worker_name || row.worker_id || '',
+      role: row.role || 'operator',
+      displayOrder: Number(row.display_order || 999),
+      active: row.active !== false,
+      note: row.note || ''
+    };
   }
-  function renderAccess() {
-    const names = { admin: '管理者', operator: '作業者', viewer: '閲覧者' };
-    el.currentRole.textContent = names[state.role] || state.role;
-    el.currentUser.textContent = state.session ? state.session.workerName : '';
-    renderTabs();
+
+  function workerPin(worker) {
+    const match = clean(worker && worker.note).match(/(?:PIN|pin|ＰＩＮ|暗証番号)\s*[:：=]\s*([0-9A-Za-z_-]+)/);
+    return match ? match[1] : '';
   }
-  function activeLots() { return state.lots.filter((lot) => Number(lot.quantity) > 0); }
+
+  function activeWorkers() { return state.workers.filter((worker) => worker.active); }
+  function ensureCategory() {
+    const categories = activeCategories();
+    if (!categories.length) {
+      state.activeCategoryId = '';
+      removeStore(CATEGORY_KEY);
+      return;
+    }
+    if (!categories.some((category) => category.id === state.activeCategoryId)) {
+      state.activeCategoryId = preferredCategoryId(categories);
+      setStore(CATEGORY_KEY, state.activeCategoryId);
+    }
+  }
+  function activeCategories() {
+    return sortCategories(state.categories.filter((category) => category.is_active && !excludedCategory(category.name)));
+  }
+  function preferredCategoryId(categories) {
+    const frozen = categories.find((category) => category.name === '冷食');
+    return (frozen || categories[0]).id;
+  }
+  function excludedCategory(name) {
+    return ['にんにく', '黒にんにく', '米穀', '玄米', '白米'].includes(clean(name));
+  }
+  function activeLots() {
+    return state.lots.filter((lot) => Number(lot.quantity) > 0 && inCurrentCategory(materialFor(lot)));
+  }
+  function inCurrentCategory(material) {
+    return Boolean(state.activeCategoryId && material && material.category_id === state.activeCategoryId);
+  }
   function renderUnits() {
     const inboundMaterial = state.materials.find((item) => item.id === el.inboundMaterial.value);
     const outboundMaterial = state.materials.find((item) => item.id === el.outboundMaterial.value);
@@ -477,7 +707,7 @@
     const unit = unitName(material);
     return `${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
   }
-  function materialName(material) { return material ? material.material_name : '原料不明'; }
+  function materialName(material) { return material ? material.material_name : '品目不明'; }
   function materialMeta(material) {
     if (!material) return '';
     const unit = unitName(material);
@@ -494,6 +724,9 @@
     const units = new Set(lots.map((lot) => unitName(materialFor(lot))).filter(Boolean));
     if (units.size === 1) return qtyUnit(sum(lots), materialFor(lots[0]));
     return `${lots.length}ロット`;
+  }
+  function sortCategories(items) {
+    return [...items].sort((a, b) => Number(a.display_order || 999) - Number(b.display_order || 999) || String(a.name || '').localeCompare(String(b.name || ''), 'ja'));
   }
   function sortName(items) { return [...items].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja')); }
   function sortMaterials(items) {
@@ -552,10 +785,10 @@
     if (text.includes('Failed to fetch')) return 'Supabaseと接続できませんでした。';
     if (text.includes('active worker not found')) return '有効な作業者でログインしてください。';
     if (text.includes('not enough stock')) return '在庫数量が不足しています。';
-    if (text.includes('active fridge not found')) return '使用中の冷蔵庫を選択してください。';
-    if (text.includes('active material not found')) return '使用中の原料を選択してください。';
+    if (text.includes('active fridge not found')) return '使用中の保管場所を選択してください。';
+    if (text.includes('active material not found')) return '使用中の品目を選択してください。';
     if (text.includes('duplicate key')) return '同じ内容がすでに登録されています。';
-    if (text.includes('frozen_ingredient_record_inbound')) return 'SupabaseのSQLセットアップを確認してください。';
+    if (text.includes('inventory_item_categories') || text.includes('frozen_ingredient_record_inbound')) return 'SupabaseのSQLセットアップを確認してください。';
     return text || '処理に失敗しました。';
   }
   function clean(value) { return String(value == null ? '' : value).trim(); }
@@ -578,5 +811,16 @@
   }
   function removeStore(key) {
     try { window.localStorage.removeItem(key); } catch (_error) {}
+  }
+  function getJson(key) {
+    try {
+      const value = getStore(key);
+      return value ? JSON.parse(value) : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+  function setJson(key, value) {
+    try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (_error) {}
   }
 })();
