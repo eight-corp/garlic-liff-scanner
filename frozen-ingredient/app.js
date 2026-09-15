@@ -742,14 +742,14 @@
   }
 
   function readConfig() {
-    const stored = getJson(CONFIG_KEY);
-    if (configured(stored)) return stored;
     if (window.BusinessConfig && window.BusinessConfig.url && window.BusinessConfig.key) {
       return {
         supabaseUrl: window.BusinessConfig.url,
         supabaseAnonKey: window.BusinessConfig.key
       };
     }
+    const stored = getJson(CONFIG_KEY);
+    if (configured(stored)) return stored;
     return {
       supabaseUrl: window.APP_CONFIG && window.APP_CONFIG.supabaseUrl ? window.APP_CONFIG.supabaseUrl : '',
       supabaseAnonKey: window.APP_CONFIG && window.APP_CONFIG.supabaseAnonKey ? window.APP_CONFIG.supabaseAnonKey : ''
