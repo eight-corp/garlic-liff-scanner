@@ -14,19 +14,19 @@
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
     'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
     'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
-    'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
-    'materialInventoryList', 'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
-    'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm',
+    'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote',
+    'inventoryFridgeFilter', 'inventoryCategoryFilter', 'inventoryMaterialSearch', 'inventoryResultCount', 'inventoryList',
+    'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
+    'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm', 'clearCategoryInputs',
     'categoryMasterList', 'fridgeForm', 'fridgeId',
-    'fridgeName', 'fridgeNote', 'fridgeActive', 'clearFridgeForm', 'fridgeMasterList', 'materialForm',
-    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialActive', 'clearMaterialForm',
+    'fridgeName', 'fridgeNote', 'fridgeActive', 'clearFridgeForm', 'clearFridgeInputs', 'fridgeMasterList', 'materialForm',
+    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialActive', 'clearMaterialForm', 'clearMaterialInputs',
     'materialMasterList', 'toast'
   ];
   const panels = {
     inbound: 'tabInbound',
     outbound: 'tabOutbound',
-    fridges: 'tabFridges',
-    materials: 'tabMaterials',
+    inventory: 'tabInventory',
     master: 'tabMaster'
   };
   const state = {
@@ -109,6 +109,9 @@
         renderInboundStockMode();
       });
     });
+    el.inventoryFridgeFilter.addEventListener('change', renderInventory);
+    el.inventoryCategoryFilter.addEventListener('change', renderInventory);
+    el.inventoryMaterialSearch.addEventListener('input', renderInventory);
     el.outboundForm.addEventListener('submit', outbound);
     el.outboundFridge.addEventListener('change', () => {
       state.selectedLotId = '';
@@ -135,6 +138,9 @@
     el.clearCategoryForm.addEventListener('click', resetCategoryForm);
     el.clearFridgeForm.addEventListener('click', resetFridgeForm);
     el.clearMaterialForm.addEventListener('click', () => resetMaterialForm());
+    el.clearCategoryInputs.addEventListener('click', clearCategoryInputs);
+    el.clearFridgeInputs.addEventListener('click', clearFridgeInputs);
+    el.clearMaterialInputs.addEventListener('click', clearMaterialInputs);
     el.categoryMasterList.addEventListener('click', editCategory);
     el.fridgeMasterList.addEventListener('click', editFridge);
     el.materialMasterList.addEventListener('click', editMaterial);
@@ -453,8 +459,8 @@
     renderTabs();
     renderSelects();
     renderInboundInventory();
-    renderFridgeInventory();
-    renderMaterialInventory();
+    renderInventoryFilters();
+    renderInventory();
     renderMasterMode();
     renderMasterLists();
     renderUnits();
@@ -462,6 +468,10 @@
   }
 
   function renderTabs() {
+    if (state.activeTab === 'fridges' || state.activeTab === 'materials') {
+      state.activeTab = 'inventory';
+      setStore(TAB_KEY, state.activeTab);
+    }
     if (!panels[state.activeTab]) state.activeTab = 'inbound';
     document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('active', button.dataset.tab === state.activeTab));
     Object.entries(panels).forEach(([tab, id]) => document.getElementById(id).classList.toggle('hidden', tab !== state.activeTab));
@@ -518,17 +528,80 @@
     el.outboundAvailable.value = lot ? qtyUnit(lot.quantity, materialFor(lot)) : '';
   }
 
-  function renderFridgeInventory() {
-    const groups = groupBy(activeLots().sort(compareLotsForFridge), (lot) => lot.fridge_id);
-    el.fridgeInventoryList.innerHTML = sortName(state.fridges).map((fridge) => {
-      const lots = groups.get(fridge.id) || [];
-      if (!lots.length) return '';
-      const rows = lots.map((lot) => stockRow(lot, 'fridge')).join('');
-      return `<article class="inventory-group">
-        <div class="group-header"><h3>${esc(fridge.name)}</h3><div class="quantity">${esc(fridgeSummary(lots))}</div></div>
-        ${rows}
-      </article>`;
-    }).join('') || '<div class="empty-row">在庫がありません。</div>';
+  function renderInventoryFilters() {
+    const lots = inventoryBaseLots();
+    const fridgeIds = new Set(lots.map((lot) => lot.fridge_id));
+    const categoryIds = new Set(lots.map((lot) => materialFor(lot)).filter(Boolean).map((material) => material.category_id));
+    fillFilterSelect(
+      el.inventoryFridgeFilter,
+      sortName(state.fridges.filter((fridge) => fridgeIds.has(fridge.id))),
+      '全ての保管場所',
+      (fridge) => fridge.name
+    );
+    fillFilterSelect(
+      el.inventoryCategoryFilter,
+      inventoryCategories().filter((category) => categoryIds.has(category.id)),
+      '全てのカテゴリ',
+      (category) => category.name
+    );
+  }
+
+  function fillFilterSelect(select, rows, allLabel, label) {
+    const previous = select.value || ALL_CATEGORIES;
+    select.innerHTML = '';
+    select.append(new Option(allLabel, ALL_CATEGORIES));
+    rows.forEach((row) => select.append(new Option(label(row), row.id)));
+    select.value = rows.some((row) => row.id === previous) ? previous : ALL_CATEGORIES;
+  }
+
+  function renderInventory() {
+    const fridgeId = el.inventoryFridgeFilter.value || ALL_CATEGORIES;
+    const categoryId = el.inventoryCategoryFilter.value || ALL_CATEGORIES;
+    const query = clean(el.inventoryMaterialSearch.value).toLocaleLowerCase('ja');
+    const lots = inventoryBaseLots().filter((lot) => {
+      const material = materialFor(lot);
+      if (!material) return false;
+      if (fridgeId !== ALL_CATEGORIES && lot.fridge_id !== fridgeId) return false;
+      if (categoryId !== ALL_CATEGORIES && material.category_id !== categoryId) return false;
+      if (!query) return true;
+      return `${material.material_name || ''} ${material.supplier_name || ''}`.toLocaleLowerCase('ja').includes(query);
+    });
+    const groups = groupBy(lots, (lot) => lot.material_id);
+    const materials = sortMaterials(Array.from(groups.keys()).map((id) => state.materials.find((material) => material.id === id)).filter(Boolean));
+    el.inventoryResultCount.textContent = `${materials.length}品目`;
+    if (!materials.length) {
+      el.inventoryList.innerHTML = '<div class="empty-row inventory-empty">条件に一致する在庫がありません。</div>';
+      return;
+    }
+    const rows = materials.map((material) => inventoryRow(material, groups.get(material.id) || [])).join('');
+    el.inventoryList.innerHTML = `<article class="inventory-group inventory-table-group">
+      <div class="summary-table-wrap">
+        <table class="summary-table inventory-table">
+          <thead><tr><th>品目</th><th>カテゴリ</th><th>保管場所・期限/管理日</th><th>合計</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </article>`;
+  }
+
+  function inventoryRow(material, lots) {
+    return `<tr>
+      <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div></td>
+      <td><span class="category-pill">${esc(categoryName(material.category_id) || '-')}</span></td>
+      <td>${inventoryLocationDetails(lots, material)}</td>
+      <td class="quantity inventory-total">${esc(qtyUnit(sum(lots), material))}</td>
+    </tr>`;
+  }
+
+  function inventoryLocationDetails(lots, material) {
+    const groups = groupBy(lots, (lot) => lot.fridge_id);
+    return Array.from(groups.values())
+      .map((rowLots) => ({ fridge: fridgeFor(rowLots[0]), lots: rowLots }))
+      .sort((a, b) => fridgeName(a.fridge).localeCompare(fridgeName(b.fridge), 'ja'))
+      .map((row) => `<div class="inventory-location">
+        <div class="inventory-location-head"><span>${esc(fridgeName(row.fridge))}</span><strong>${esc(qtyUnit(sum(row.lots), material))}</strong></div>
+        <div class="stock-meta summary-meta">${expiryChips(row.lots, material)}</div>
+      </div>`).join('');
   }
 
   function renderInboundInventory() {
@@ -543,23 +616,6 @@
     el.inboundStockMaterialTab.classList.toggle('active', materials);
     el.inboundFridgeInventoryPanel.classList.toggle('hidden', materials);
     el.inboundMaterialInventoryPanel.classList.toggle('hidden', !materials);
-  }
-
-  function renderMaterialInventory() {
-    el.materialInventoryList.innerHTML = materialInventoryHtml('在庫がありません。');
-  }
-
-  function materialInventoryHtml(emptyLabel) {
-    const groups = groupBy(activeLots().sort(compareLotsForMaterial), (lot) => lot.material_id);
-    return sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => {
-      const lots = groups.get(material.id) || [];
-      if (!lots.length) return '';
-      const rows = lots.map((lot) => stockRow(lot, 'material')).join('');
-      return `<article class="inventory-group">
-        <div class="group-header"><div><h3>${esc(material.material_name)}</h3><div class="stock-sub">${esc(materialMeta(material))}</div></div><div class="quantity">${esc(qtyUnit(sum(lots), material))}</div></div>
-        ${rows}
-      </article>`;
-    }).join('') || `<div class="empty-row">${esc(emptyLabel)}</div>`;
   }
 
   function inboundFridgeInventoryHtml() {
@@ -832,6 +888,31 @@
     el.materialActive.checked = true;
   }
 
+  function clearCategoryInputs() {
+    el.categoryId.value = '';
+    el.categoryName.value = '';
+    el.categoryDisplayOrder.value = '';
+    el.categoryActive.checked = true;
+    el.categoryName.focus();
+  }
+
+  function clearFridgeInputs() {
+    el.fridgeId.value = '';
+    el.fridgeName.value = '';
+    el.fridgeNote.value = '';
+    el.fridgeActive.checked = true;
+    el.fridgeName.focus();
+  }
+
+  function clearMaterialInputs() {
+    el.materialId.value = '';
+    el.supplierName.value = '';
+    el.materialName.value = '';
+    el.materialUnit.value = '';
+    el.materialActive.checked = true;
+    el.supplierName.focus();
+  }
+
   function showSetup() {
     el.setupScreen.classList.remove('hidden');
     el.authScreen.classList.add('hidden');
@@ -926,6 +1007,9 @@
   function activeCategories() {
     return sortCategories(state.categories.filter((category) => category.is_active && !excludedCategory(category.name)));
   }
+  function inventoryCategories() {
+    return sortCategories(state.categories.filter((category) => !excludedCategory(category.name)));
+  }
   function preferredCategoryId(categories) {
     const frozen = categories.find((category) => category.name === '冷食');
     return (frozen || categories[0]).id;
@@ -946,6 +1030,13 @@
   }
   function activeLots() {
     return state.lots.filter((lot) => Number(lot.quantity) > 0 && inCurrentCategory(materialFor(lot)));
+  }
+  function inventoryBaseLots() {
+    const categoryIds = new Set(inventoryCategories().map((category) => category.id));
+    return state.lots.filter((lot) => {
+      const material = materialFor(lot);
+      return Number(lot.quantity) > 0 && material && categoryIds.has(material.category_id);
+    });
   }
   function inCurrentCategory(material) {
     if (!material) return false;
