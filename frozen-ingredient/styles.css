@@ -526,6 +526,23 @@ input[readonly] {
   border-bottom: 0;
 }
 
+.master-action-cell {
+  white-space: nowrap;
+}
+
+.master-table-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.master-table-actions .icon-button {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
 .stock-meta {
   display: flex;
   flex-wrap: wrap;
