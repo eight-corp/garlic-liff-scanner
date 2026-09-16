@@ -13,7 +13,7 @@
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
     'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
-    'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
+    'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundCategory', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote',
     'inventoryFridgeFilter', 'inventoryCategoryFilter', 'inventoryMaterialSearch', 'inventoryResultCount', 'inventoryList',
     'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
@@ -114,6 +114,10 @@
     el.inventoryMaterialSearch.addEventListener('input', renderInventory);
     el.outboundForm.addEventListener('submit', outbound);
     el.outboundFridge.addEventListener('change', () => {
+      state.selectedLotId = '';
+      renderOutboundCategories();
+    });
+    el.outboundCategory.addEventListener('change', () => {
       state.selectedLotId = '';
       renderOutboundMaterials();
     });
@@ -481,7 +485,7 @@
     state.activeTab = panels[tab] ? tab : 'inbound';
     setStore(TAB_KEY, state.activeTab);
     renderTabs();
-    if (state.activeTab === 'outbound') renderOutboundLots();
+    if (state.activeTab === 'outbound') renderOutboundCategories();
     icons();
   }
 
@@ -490,16 +494,39 @@
     const activeMaterials = sortMaterials(state.materials.filter((item) => item.is_active && inCurrentCategory(item)));
     fillSelect(el.inboundFridge, activeFridges, (item) => item.name, '保管場所が未登録です');
     fillSelect(el.inboundMaterial, activeMaterials, materialLabel, materialEmptyText());
-    const fridgeIds = new Set(activeLots().map((lot) => lot.fridge_id));
+    const fridgeIds = new Set(inventoryBaseLots().map((lot) => lot.fridge_id));
     fillSelect(el.outboundFridge, sortName(state.fridges.filter((item) => fridgeIds.has(item.id))), (item) => item.name, '出庫できる在庫がありません');
-    renderOutboundMaterials();
+    renderOutboundCategories();
     renderUnits();
+  }
+
+  function renderOutboundCategories() {
+    const fridgeId = el.outboundFridge.value;
+    const categoryIds = new Set(
+      inventoryBaseLots()
+        .filter((lot) => lot.fridge_id === fridgeId)
+        .map((lot) => materialFor(lot))
+        .filter(Boolean)
+        .map((material) => material.category_id)
+    );
+    fillFilterSelect(
+      el.outboundCategory,
+      inventoryCategories().filter((category) => categoryIds.has(category.id)),
+      '全てのカテゴリ',
+      (category) => category.name
+    );
+    el.outboundCategory.disabled = !fridgeId;
+    renderOutboundMaterials();
   }
 
   function renderOutboundMaterials() {
     const fridgeId = el.outboundFridge.value;
-    const ids = new Set(activeLots().filter((lot) => lot.fridge_id === fridgeId).map((lot) => lot.material_id));
-    fillSelect(el.outboundMaterial, sortMaterials(state.materials.filter((item) => ids.has(item.id))), materialLabel, 'この保管場所に在庫がありません');
+    const categoryId = el.outboundCategory.value || ALL_CATEGORIES;
+    const ids = new Set(inventoryBaseLots().filter((lot) => {
+      const material = materialFor(lot);
+      return lot.fridge_id === fridgeId && material && (categoryId === ALL_CATEGORIES || material.category_id === categoryId);
+    }).map((lot) => lot.material_id));
+    fillSelect(el.outboundMaterial, sortMaterials(state.materials.filter((item) => ids.has(item.id))), outboundMaterialLabel, '条件に一致する在庫がありません');
     renderOutboundLots();
     renderUnits();
   }
@@ -507,7 +534,7 @@
   function renderOutboundLots() {
     const fridgeId = el.outboundFridge.value;
     const materialId = el.outboundMaterial.value;
-    const lots = activeLots().filter((lot) => lot.fridge_id === fridgeId && lot.material_id === materialId).sort(compareLotsForFridge);
+    const lots = inventoryBaseLots().filter((lot) => lot.fridge_id === fridgeId && lot.material_id === materialId).sort(compareLotsForFridge);
     if (!lots.some((lot) => lot.id === state.selectedLotId)) state.selectedLotId = '';
     if (!lots.length) {
       el.outboundLotList.innerHTML = '<div class="empty-row">出庫できる在庫がありません。</div>';
@@ -1070,6 +1097,11 @@
   function materialLabel(material) {
     const unit = unitName(material);
     return `${materialCategoryPrefix(material)}${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
+  }
+  function outboundMaterialLabel(material) {
+    const unit = unitName(material);
+    const category = el.outboundCategory.value === ALL_CATEGORIES ? categoryName(material.category_id) : '';
+    return `${category ? `${category} / ` : ''}${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
   }
   function materialName(material) { return material ? material.material_name : '品目不明'; }
   function materialMeta(material) {
