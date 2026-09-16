@@ -3,7 +3,7 @@ const auth=window.BusinessAuth;
 auth.init(window.BusinessConfig.url,window.BusinessConfig.key);
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const appIds=['garlic_fridge','black_garlic','garlic_drying','frozen_ingredients','rice_shipping'];
+const appIds=['garlic_fridge','black_garlic','black_garlic_shipping','garlic_drying','frozen_ingredients','rice_shipping'];
 const roleNames={admin:'管理者',operator:'作業者',viewer:'閲覧者'};
 const lastUserKey='business.lastUser.v1';
 let loginUsers=new Map();

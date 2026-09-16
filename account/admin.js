@@ -5,8 +5,9 @@ const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 let current=null,data=null,pinTargetFormId='',statusTimer=0;
 const roleOptions=[['','利用不可'],['admin','管理者'],['operator','作業者'],['viewer','閲覧者']];
-const shortNames={garlic_fridge:'冷蔵庫',black_garlic:'黒にんにく',garlic_drying:'乾燥設備',frozen_ingredients:'資材在庫',rice_shipping:'米穀出荷'};
-const gasApps=new Set(['black_garlic','garlic_drying']);
+const shortNames={garlic_fridge:'冷蔵庫',black_garlic:'室管理',black_garlic_shipping:'黒出荷',garlic_drying:'乾燥設備',frozen_ingredients:'資材在庫',rice_shipping:'米穀出荷'};
+const gasApps=new Set(['garlic_drying']);
+const plannedApps=new Set(['black_garlic_shipping']);
 const lastUserKey='business.lastUser.v1';
 
 function status(message,success=false){clearTimeout(statusTimer);$('status').textContent=message;$('status').classList.toggle('success',success);if(message&&success)statusTimer=setTimeout(()=>status(''),5000);}
@@ -16,7 +17,7 @@ async function busy(form,fn){const buttons=[...form.querySelectorAll('button')];
 async function showLogin(){current=null;$('managementPanel').hidden=true;$('loginPanel').hidden=false;const users=await auth.users('management');$('loginUser').innerHTML=users.map(user=>`<option value="${esc(user.workerId)}">${esc(user.workerName)}</option>`).join('');const remembered=lastUser();if(users.some(user=>user.workerId===remembered))$('loginUser').value=remembered;}
 async function refresh(){current=await auth.session();if(!current?.systemAdmin){await showLogin();return;}data=await auth.rpc('business_admin_data');$('loginPanel').hidden=true;$('managementPanel').hidden=false;$('signedIn').textContent=current.workerName+'（全体管理者）';render();}
 
-function appHeaders(){return data.apps.map(app=>`<th>${esc(shortNames[app.app_id]||app.app_name)}<span class="app-state">${app.migrated?'切替済':gasApps.has(app.app_id)?'GAS版':'未移行'}</span></th>`).join('');}
+function appHeaders(){return data.apps.map(app=>`<th>${esc(shortNames[app.app_id]||app.app_name)}<span class="app-state">${app.migrated?'切替済':plannedApps.has(app.app_id)?'準備中':gasApps.has(app.app_id)?'GAS版':'未移行'}</span></th>`).join('');}
 function userRow(user,key,isNew=false){
  const formId=`user-form-${key}`;
  const idCell=isNew?`<input class="cell-input" form="${formId}" name="workerId" aria-label="ユーザーID" required>`:`<span title="${esc(user.workerId)}">${esc(user.workerId)}</span><input form="${formId}" name="workerId" type="hidden" value="${esc(user.workerId)}">`;

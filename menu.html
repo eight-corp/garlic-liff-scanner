@@ -25,9 +25,12 @@
     .open { margin-top: auto; font-weight: 700; font-size: 14px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; }
     .arrow { font-size: 22px; font-weight: 400; }
     .fridge { --accent: #326a9a; --tint: #edf4fc; }
+    .shipping { --accent: #7b4b2a; --tint: #f8eee7; }
     .dry { --accent: #9a6922; --tint: #fff5e4; }
     .frozen { --accent: #247a7c; --tint: #eaf7f5; }
     .rice { --accent: #507238; --tint: #eff5e8; }
+    button.card.pending { width: 100%; margin: 0; text-align: left; opacity: 1; cursor: not-allowed; }
+    button.card.pending:hover { transform: none; border-color: #dce3dd; box-shadow: 0 3px 10px #20382a05; }
     footer { margin-top: 30px; font-size: 13px; color: #69786d; line-height: 1.9; }
     footer p { margin: 4px 0; }
     .panel { max-width: 520px; margin: 8vh auto 0; padding: 26px; background: #fff; border: 1px solid #dce3dd; border-radius: 18px; }
@@ -100,6 +103,12 @@
         <p class="description">米穀の在庫確認・QRコードでの出荷登録</p>
         <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
       </a>
+      <button type="button" class="card shipping pending" data-app="black_garlic_shipping" disabled>
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3zM14 10h4l3 3v4h-7zM6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm11 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></span>
+        <h2>黒にんにく出荷管理</h2>
+        <p class="description">黒にんにくの出荷登録・出荷履歴</p>
+        <span class="open">アプリ準備中</span>
+      </button>
       </nav>
       <p id="noApps" class="empty" hidden>利用できる管理画面が設定されていません。全体管理者へ確認してください。</p>
       <footer>
@@ -112,6 +121,6 @@
   </main>
   <script src="./shared/business-auth.js"></script>
   <script src="./shared/business-config.js"></script>
-  <script src="./menu.js?v=20260912-gas-and-github-admin"></script>
+  <script src="./menu.js?v=20260916-black-shipping"></script>
 </body>
 </html>

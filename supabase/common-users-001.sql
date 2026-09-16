@@ -23,9 +23,10 @@ create table if not exists business_private.apps (
 insert into business_private.apps values
  ('garlic_fridge','にんにく冷蔵庫管理',false,1),
  ('black_garlic','黒にんにく室管理',false,2),
- ('garlic_drying','乾燥設備在庫管理',false,3),
- ('frozen_ingredients','冷食原材料管理',false,4),
- ('rice_shipping','米穀出荷管理',false,5)
+ ('black_garlic_shipping','黒にんにく出荷管理',false,3),
+ ('garlic_drying','乾燥設備在庫管理',false,4),
+ ('frozen_ingredients','冷食原材料管理',false,5),
+ ('rice_shipping','米穀出荷管理',false,6)
 on conflict (app_id) do nothing;
 create table if not exists business_private.permissions (
   worker_id text not null references business_private.users(worker_id),
