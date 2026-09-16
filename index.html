@@ -1653,7 +1653,7 @@
         <h2>QR読取パレット</h2>
         <span id="launchPalletNo" class="notice"></span>
       </div>
-      <p class="muted">スマホ標準カメラから開きました。処理を選んでください。</p>
+      <p class="muted">スマホ標準カメラから開きました。処理を選ぶか、取り消してください。</p>
       <div id="launchDataStatus" class="launch-data-status hidden" role="status" aria-live="polite">
         <span class="launch-spinner" aria-hidden="true"></span>
         <span id="launchDataStatusText">データを読み込み中です...</span>
@@ -1662,6 +1662,7 @@
         <button type="button" data-launch-action="inbound">入庫へ</button>
         <button type="button" data-launch-action="outbound">出庫へ</button>
         <button type="button" data-launch-action="move">移動へ</button>
+        <button type="button" class="secondary" data-launch-action="cancel">取り消し</button>
       </div>
     </section>
 
@@ -2520,6 +2521,12 @@
     async function applyLaunchAction(action) {
       const palletNo = state.launch.palletNo;
       if (!palletNo) return;
+      if (action === 'cancel') {
+        setLaunchActionPending(false);
+        dismissLaunchPanel();
+        showToast('QR読取パレットの操作を取り消しました。');
+        return;
+      }
       if (!state.data) {
         setLaunchDataLoading(true);
         await refreshAll();
@@ -2565,7 +2572,7 @@
       status.classList.toggle('error', failed);
       status.querySelector('.launch-spinner').classList.toggle('hidden', !loading);
       statusText.textContent = loading ? 'データを読み込み中です...' : message;
-      document.querySelectorAll('[data-launch-action]').forEach(button => {
+      document.querySelectorAll('[data-launch-action]:not([data-launch-action="cancel"])').forEach(button => {
         button.disabled = loading || failed;
       });
     }
