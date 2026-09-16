@@ -11,8 +11,8 @@
   const ids = [
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
-    'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
+    'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundDateType', 'inboundDateLabel', 'inboundExpiration',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'clearInboundForm', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
     'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundCategory', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote',
     'inventoryFridgeFilter', 'inventoryCategoryFilter', 'inventoryMaterialSearch', 'inventoryResultCount', 'inventoryList',
@@ -20,7 +20,7 @@
     'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm', 'clearCategoryInputs',
     'categoryMasterList', 'fridgeForm', 'fridgeId',
     'fridgeName', 'fridgeNote', 'fridgeActive', 'clearFridgeForm', 'clearFridgeInputs', 'fridgeMasterList', 'materialForm',
-    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialNote', 'materialActive', 'clearMaterialForm', 'clearMaterialInputs',
+    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialDateType', 'materialNote', 'materialActive', 'clearMaterialForm', 'clearMaterialInputs',
     'materialMasterList', 'toast'
   ];
   const panels = {
@@ -102,11 +102,20 @@
       renderWorkers();
     });
     el.inboundForm.addEventListener('submit', inbound);
-    el.inboundMaterial.addEventListener('change', renderUnits);
+    el.inboundMaterial.addEventListener('change', applyInboundMaterialDefaults);
+    el.inboundDateType.addEventListener('change', renderInboundDateLabel);
+    el.clearInboundForm.addEventListener('click', clearInboundEntry);
     document.querySelectorAll('[data-inbound-stock-mode]').forEach((button) => {
       button.addEventListener('click', () => {
         state.inboundStockMode = button.dataset.inboundStockMode === 'materials' ? 'materials' : 'fridges';
         renderInboundStockMode();
+      });
+    });
+    [el.inboundFridgeInventoryList, el.inboundMaterialInventoryList].forEach((list) => {
+      list.addEventListener('click', loadInboundFromStockRow);
+      list.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        loadInboundFromStockRow(event);
       });
     });
     el.inventoryFridgeFilter.addEventListener('change', renderInventory);
@@ -312,7 +321,7 @@
       state.client.from('frozen_ingredient_materials').select('*').order('supplier_name', { ascending: true }).order('material_name', { ascending: true }),
       state.client
         .from('frozen_ingredient_stock_lots')
-        .select('id, fridge_id, material_id, expiration_date, quantity, received_at, updated_at, fridge:frozen_ingredient_fridges(id, name, is_active), material:frozen_ingredient_materials(id, category_id, supplier_name, material_name, unit_name, is_active)')
+        .select('id, fridge_id, material_id, date_type, expiration_date, quantity, received_at, updated_at, fridge:frozen_ingredient_fridges(id, name, is_active), material:frozen_ingredient_materials(id, category_id, supplier_name, material_name, unit_name, date_type, is_active)')
         .gt('quantity', 0)
         .order('expiration_date', { ascending: true })
     ]);
@@ -350,6 +359,7 @@
       p_worker_id: state.workerId,
       p_fridge_id: el.inboundFridge.value,
       p_material_id: el.inboundMaterial.value,
+      p_date_type: el.inboundDateType.value,
       p_expiration_date: el.inboundExpiration.value,
       p_quantity: Number(el.inboundQuantity.value),
       p_note: clean(el.inboundNote.value) || null
@@ -444,6 +454,7 @@
       supplier_name: clean(el.supplierName.value),
       material_name: clean(el.materialName.value),
       unit_name: clean(el.materialUnit.value),
+      date_type: el.materialDateType.value,
       note: clean(el.materialNote.value) || null,
       is_active: el.materialActive.checked
     };
@@ -498,6 +509,7 @@
     const fridgeIds = new Set(inventoryBaseLots().map((lot) => lot.fridge_id));
     fillSelect(el.outboundFridge, sortName(state.fridges.filter((item) => fridgeIds.has(item.id))), (item) => item.name, '出庫できる在庫がありません');
     renderOutboundCategories();
+    applyInboundMaterialDefaults();
     renderUnits();
   }
 
@@ -547,7 +559,7 @@
       const exp = expiry(lot.expiration_date);
       const material = materialFor(lot);
       return `<button class="lot-choice ${selected ? 'selected' : ''}" type="button" data-lot-id="${esc(lot.id)}">
-        <span>${esc(date(lot.expiration_date))}</span>
+        <span>${esc(dateTypeLabel(lotDateType(lot)))} ${esc(date(lot.expiration_date))}</span>
         <strong>${esc(qtyUnit(lot.quantity, material))}</strong>
         <small class="${exp.className}">${esc(exp.label)}</small>
       </button>`;
@@ -647,35 +659,79 @@
     el.inboundMaterialInventoryPanel.classList.toggle('hidden', !materials);
   }
 
+  function clearInboundEntry() {
+    applyInboundMaterialDefaults();
+    el.inboundExpiration.value = '';
+    el.inboundQuantity.value = '';
+    el.inboundNote.value = '';
+    el.inboundExpiration.focus();
+  }
+
+  function loadInboundFromStockRow(event) {
+    const row = event.target.closest('[data-inbound-material-id]');
+    if (!row) return;
+    if (event.type === 'keydown') event.preventDefault();
+    const material = state.materials.find((item) => item.id === row.dataset.inboundMaterialId);
+    if (!material) return;
+    state.activeCategoryId = material.category_id;
+    setStore(CATEGORY_KEY, state.activeCategoryId);
+    renderCategories();
+    renderSelects();
+    if (Array.from(el.inboundFridge.options).some((option) => option.value === row.dataset.inboundFridgeId)) {
+      el.inboundFridge.value = row.dataset.inboundFridgeId;
+    }
+    if (Array.from(el.inboundMaterial.options).some((option) => option.value === material.id)) {
+      el.inboundMaterial.value = material.id;
+    }
+    applyInboundMaterialDefaults();
+    el.inboundExpiration.value = '';
+    el.inboundQuantity.value = '';
+    el.inboundNote.value = '';
+    renderInboundInventory();
+    el.inboundForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.inboundExpiration.focus({ preventScroll: true });
+    toast('品目を入庫入力へ反映しました。');
+  }
+
   function inboundFridgeInventoryHtml() {
-    const groups = groupBy(activeLots().sort(compareLotsForFridge), (lot) => lot.fridge_id);
-    return sortName(state.fridges).map((fridge) => {
-      const lots = groups.get(fridge.id) || [];
-      if (!lots.length) return '';
-      const materialGroups = groupBy(lots, (lot) => lot.material_id);
-      const rows = Array.from(materialGroups.values())
-        .map((rowLots) => ({ material: materialFor(rowLots[0]), lots: rowLots }))
-        .filter((row) => row.material)
-        .sort((a, b) => compareMaterials(a.material, b.material))
-        .map((row) => summaryRow(materialName(row.material), materialMeta(row.material), qtyUnit(sum(row.lots), row.material), expiryChips(row.lots, row.material)))
-        .join('');
-      return summaryGroup(fridge.name, fridgeSummary(lots), ['品目', '数量', '期限/管理日'], rows);
-    }).join('') || `<div class="empty-row">${esc(currentStockEmptyText())}</div>`;
+    const materials = inboundMaterials();
+    const fridges = sortName(state.fridges.filter((fridge) => fridge.is_active));
+    if (!materials.length) return `<div class="empty-row">${esc(materialEmptyText())}</div>`;
+    if (!fridges.length) return '<div class="empty-row">保管場所が未登録です。</div>';
+    const lots = activeLots().sort(compareLotsForFridge);
+    return fridges.map((fridge) => {
+      const fridgeLots = lots.filter((lot) => lot.fridge_id === fridge.id);
+      const rows = materials.map((material) => inboundStockRow(material, fridge, fridgeLots.filter((lot) => lot.material_id === material.id))).join('');
+      return summaryGroup(fridge.name, fridgeSummary(fridgeLots), ['品目', '数量', '期限/管理日'], rows);
+    }).join('');
   }
 
   function inboundMaterialInventoryHtml() {
+    const materials = inboundMaterials();
+    const fridges = sortName(state.fridges.filter((fridge) => fridge.is_active));
+    if (!materials.length) return `<div class="empty-row">${esc(materialEmptyText())}</div>`;
+    if (!fridges.length) return '<div class="empty-row">保管場所が未登録です。</div>';
     const groups = groupBy(activeLots().sort(compareLotsForMaterial), (lot) => lot.material_id);
-    return sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => {
+    return materials.map((material) => {
       const lots = groups.get(material.id) || [];
-      if (!lots.length) return '';
-      const fridgeGroups = groupBy(lots, (lot) => lot.fridge_id);
-      const rows = Array.from(fridgeGroups.values())
-        .map((rowLots) => ({ fridge: fridgeFor(rowLots[0]), lots: rowLots }))
-        .sort((a, b) => String(fridgeName(a.fridge)).localeCompare(String(fridgeName(b.fridge)), 'ja'))
-        .map((row) => summaryRow(fridgeName(row.fridge), '', qtyUnit(sum(row.lots), material), expiryChips(row.lots, material)))
-        .join('');
+      const rows = fridges.map((fridge) => inboundStockRow(material, fridge, lots.filter((lot) => lot.fridge_id === fridge.id), 'fridge')).join('');
       return summaryGroup(material.material_name, qtyUnit(sum(lots), material), ['保管場所', '数量', '期限/管理日'], rows, materialMeta(material));
-    }).join('') || `<div class="empty-row">${esc(currentStockEmptyText())}</div>`;
+    }).join('');
+  }
+
+  function inboundMaterials() {
+    return sortMaterials(state.materials.filter((material) => material.is_active && inCurrentCategory(material)));
+  }
+
+  function inboundStockRow(material, fridge, lots, titleMode = 'material') {
+    const title = titleMode === 'fridge' ? fridgeName(fridge) : materialName(material);
+    const sub = titleMode === 'fridge' ? '' : materialMeta(material);
+    const detail = lots.length ? expiryChips(lots, material) : '<span class="zero-stock">在庫なし</span>';
+    return `<tr class="selectable-stock-row" tabindex="0" role="button" data-inbound-material-id="${esc(material.id)}" data-inbound-fridge-id="${esc(fridge.id)}" aria-label="${esc(`${title}を入庫入力へ反映`)}">
+      <td><div class="stock-title">${esc(title)}</div>${sub ? `<div class="stock-sub">${esc(sub)}</div>` : ''}</td>
+      <td class="quantity">${esc(qtyUnit(sum(lots), material))}</td>
+      <td><div class="stock-meta summary-meta">${detail}</div></td>
+    </tr>`;
   }
 
   function summaryGroup(title, quantity, headers, rows, sub) {
@@ -699,10 +755,11 @@
   }
 
   function expiryChips(lots, material) {
-    const groups = groupBy([...lots].sort(compareLotsForFridge), (lot) => lot.expiration_date);
-    return Array.from(groups.entries()).map(([expirationDate, rowLots]) => {
+    const groups = groupBy([...lots].sort(compareLotsForFridge), (lot) => `${lotDateType(lot)}\u0000${lot.expiration_date}`);
+    return Array.from(groups.values()).map((rowLots) => {
+      const expirationDate = rowLots[0].expiration_date;
       const exp = expiry(expirationDate);
-      return `<span class="date-pill ${exp.className}" title="${esc(exp.label)}">${esc(date(expirationDate))} ${esc(qtyUnit(sum(rowLots), material))}</span>`;
+      return `<span class="date-pill ${exp.className}" title="${esc(exp.label)}">${esc(dateTypeLabel(lotDateType(rowLots[0])))} ${esc(date(expirationDate))} ${esc(qtyUnit(sum(rowLots), material))}</span>`;
     }).join('');
   }
 
@@ -792,7 +849,7 @@
     const materials = sortMaterials(state.materials.filter((material) => material.category_id === categoryId));
     if (!materials.length) return '<div class="empty-row">このカテゴリの品目が未登録です。</div>';
     const rows = materials.map(materialMasterRow).join('');
-    return summaryGroup(category.name, `${materials.length}品目`, ['品目', '単位', '状態/編集'], rows);
+    return summaryGroup(category.name, `${materials.length}品目`, ['品目', '単位', '期限種別', '状態/編集'], rows);
   }
 
   function materialMasterRow(material) {
@@ -800,6 +857,7 @@
     return `<tr>
       <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div>${note ? `<div class="stock-sub">備考: ${esc(note)}</div>` : ''}</td>
       <td class="quantity">${esc(unitName(material) || '-')}</td>
+      <td>${esc(dateTypeLabel(material.date_type, '空欄'))}</td>
       <td class="master-action-cell"><div class="master-table-actions"><span class="state-pill ${material.is_active ? 'active' : 'paused'}">${material.is_active ? '使用中' : '停止中'}</span><button class="icon-button" type="button" data-edit-material="${esc(material.id)}" aria-label="編集" title="編集"><i data-lucide="pencil"></i></button></div></td>
     </tr>`;
   }
@@ -891,6 +949,7 @@
     el.supplierName.value = material.supplier_name || '';
     el.materialName.value = material.material_name || '';
     el.materialUnit.value = material.unit_name || 'kg';
+    el.materialDateType.value = normalizeDateType(material.date_type);
     el.materialNote.value = material.note || '';
     el.materialActive.checked = Boolean(material.is_active);
     el.supplierName.focus();
@@ -916,6 +975,7 @@
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = 'kg';
+    el.materialDateType.value = '';
     el.materialNote.value = '';
     el.materialActive.checked = true;
   }
@@ -941,6 +1001,7 @@
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = '';
+    el.materialDateType.value = '';
     el.materialNote.value = '';
     el.materialActive.checked = true;
     el.supplierName.focus();
@@ -1084,6 +1145,24 @@
     el.inboundUnit.textContent = unitName(inboundMaterial) || '単位';
     el.outboundUnit.textContent = unitName(outboundMaterial) || '単位';
   }
+  function applyInboundMaterialDefaults() {
+    const material = state.materials.find((item) => item.id === el.inboundMaterial.value);
+    el.inboundDateType.value = normalizeDateType(material && material.date_type);
+    renderInboundDateLabel();
+    renderUnits();
+  }
+  function renderInboundDateLabel() {
+    el.inboundDateLabel.textContent = dateTypeLabel(el.inboundDateType.value);
+  }
+  function normalizeDateType(value) {
+    return ['賞味期限', '消費期限'].includes(clean(value)) ? clean(value) : '';
+  }
+  function dateTypeLabel(value, blankLabel = '管理日') {
+    return normalizeDateType(value) || blankLabel;
+  }
+  function lotDateType(lot) {
+    return normalizeDateType(lot && lot.date_type);
+  }
   function materialFor(lot) {
     return state.materials.find((item) => item.id === lot.material_id) || lot.material || null;
   }
@@ -1114,8 +1193,9 @@
     if (!material) return '';
     const unit = unitName(material);
     const base = `${materialCategoryPrefix(material)}${unit ? `${material.supplier_name} / ${unit}` : material.supplier_name}`;
+    const dateType = normalizeDateType(material.date_type);
     const note = clean(material.note);
-    return note ? `${base} / 備考: ${note}` : base;
+    return [base, dateType ? `期限種別: ${dateType}` : '', note ? `備考: ${note}` : ''].filter(Boolean).join(' / ');
   }
   function materialEmptyText(suffix = '') {
     return state.activeCategoryId === ALL_CATEGORIES ? `品目が未登録です${suffix}` : `このカテゴリの品目が未登録です${suffix}`;
@@ -1201,6 +1281,7 @@
     if (text.includes('active fridge not found')) return '使用中の保管場所を選択してください。';
     if (text.includes('active material not found')) return '使用中の品目を選択してください。';
     if (text.includes('duplicate key')) return '同じ内容がすでに登録されています。';
+    if (text.includes('date_type') || text.includes('p_date_type')) return '期限種別追加SQLが未実行です。supabase-add-material-date-type.sqlをSupabase SQL Editorで実行してください。';
     if (text.includes('schema cache') && text.includes('frozen_ingredient_materials') && text.includes('note')) return '品目備考追加SQLが未実行です。supabase-add-material-note.sqlをSupabase SQL Editorで実行してください。';
     if (text.includes('inventory_item_categories') || text.includes('category_id')) return 'カテゴリ追加SQLが未実行です。supabase-add-inventory-categories.sqlをSupabase SQL Editorで実行してください。';
     if (text.includes('frozen_ingredient_record_inbound')) return '入出庫RPCのSQLセットアップを確認してください。';

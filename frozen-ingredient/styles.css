@@ -570,6 +570,26 @@ input[readonly] {
   border-bottom: 0;
 }
 
+.selectable-stock-row {
+  cursor: pointer;
+}
+
+.selectable-stock-row:hover,
+.selectable-stock-row:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.selectable-stock-row:active {
+  background: #caeae4;
+}
+
+.zero-stock {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .inventory-table {
   min-width: 660px;
 }

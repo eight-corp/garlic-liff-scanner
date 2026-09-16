@@ -55,6 +55,7 @@ create table if not exists public.frozen_ingredient_materials (
   supplier_name text not null,
   material_name text not null,
   unit_name text not null default 'kg',
+  date_type text not null default '',
   note text,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -134,6 +135,28 @@ do $$
 begin
   if not exists (
     select 1
+      from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'frozen_ingredient_materials'
+       and column_name = 'date_type'
+  ) then
+    alter table public.frozen_ingredient_materials
+    add column date_type text not null default '';
+
+    execute $update$
+      update public.frozen_ingredient_materials as material
+         set date_type = '消費期限'
+        from public.inventory_item_categories as category
+       where material.category_id = category.id
+         and category.name = '冷食'
+    $update$;
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
       from pg_constraint
      where conname = 'frozen_ingredient_materials_note_length_check'
   ) then
@@ -143,32 +166,98 @@ begin
   end if;
 end $$;
 
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_constraint
+     where conname = 'frozen_ingredient_materials_date_type_check'
+  ) then
+    alter table public.frozen_ingredient_materials
+    add constraint frozen_ingredient_materials_date_type_check
+    check (date_type in ('', '賞味期限', '消費期限'));
+  end if;
+end $$;
+
 comment on table public.frozen_ingredient_materials is '資材在庫アプリ: 品目マスタ';
 comment on column public.frozen_ingredient_materials.category_id is '在庫カテゴリ';
 comment on column public.frozen_ingredient_materials.supplier_name is '仕入先名';
 comment on column public.frozen_ingredient_materials.material_name is '品目名';
 comment on column public.frozen_ingredient_materials.unit_name is '数量単位';
+comment on column public.frozen_ingredient_materials.date_type is '空欄、賞味期限、消費期限';
 comment on column public.frozen_ingredient_materials.note is '品目備考';
 
 create table if not exists public.frozen_ingredient_stock_lots (
   id uuid primary key default gen_random_uuid(),
   fridge_id uuid not null references public.frozen_ingredient_fridges(id),
   material_id uuid not null references public.frozen_ingredient_materials(id),
+  date_type text not null default '',
   expiration_date date not null,
   quantity numeric(12, 3) not null default 0 check (quantity >= 0),
   received_at timestamptz not null default now(),
   created_by_worker_id text references public.workers(worker_id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint frozen_ingredient_stock_lots_unique unique (fridge_id, material_id, expiration_date)
+  constraint frozen_ingredient_stock_lots_date_unique unique (fridge_id, material_id, date_type, expiration_date)
 );
 
 alter table public.frozen_ingredient_stock_lots
 add column if not exists created_by_worker_id text references public.workers(worker_id);
 
+do $$
+begin
+  if not exists (
+    select 1
+      from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'frozen_ingredient_stock_lots'
+       and column_name = 'date_type'
+  ) then
+    alter table public.frozen_ingredient_stock_lots
+    add column date_type text not null default '';
+
+    execute $update$
+      update public.frozen_ingredient_stock_lots as lot
+         set date_type = material.date_type
+        from public.frozen_ingredient_materials as material
+       where lot.material_id = material.id
+    $update$;
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_constraint
+     where conname = 'frozen_ingredient_stock_lots_date_type_check'
+  ) then
+    alter table public.frozen_ingredient_stock_lots
+    add constraint frozen_ingredient_stock_lots_date_type_check
+    check (date_type in ('', '賞味期限', '消費期限'));
+  end if;
+end $$;
+
+alter table public.frozen_ingredient_stock_lots
+drop constraint if exists frozen_ingredient_stock_lots_unique;
+
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_constraint
+     where conname = 'frozen_ingredient_stock_lots_date_unique'
+  ) then
+    alter table public.frozen_ingredient_stock_lots
+    add constraint frozen_ingredient_stock_lots_date_unique
+    unique (fridge_id, material_id, date_type, expiration_date);
+  end if;
+end $$;
+
 comment on table public.frozen_ingredient_stock_lots is '資材在庫アプリ: 現在庫ロット';
 comment on column public.frozen_ingredient_stock_lots.fridge_id is '保管場所';
 comment on column public.frozen_ingredient_stock_lots.material_id is '品目';
+comment on column public.frozen_ingredient_stock_lots.date_type is '入庫時の期限種別';
 comment on column public.frozen_ingredient_stock_lots.expiration_date is '期限/管理日';
 comment on column public.frozen_ingredient_stock_lots.quantity is '現在数量';
 
@@ -356,13 +445,16 @@ begin
 end;
 $$;
 
+drop function if exists public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text);
+
 create or replace function public.frozen_ingredient_record_inbound(
   p_worker_id text,
   p_fridge_id uuid,
   p_material_id uuid,
   p_expiration_date date,
   p_quantity numeric,
-  p_note text default null
+  p_note text default null,
+  p_date_type text default ''
 )
 returns uuid
 language plpgsql
@@ -372,6 +464,7 @@ as $$
 declare
   v_worker public.workers%rowtype;
   v_lot_id uuid;
+  v_date_type text := coalesce(p_date_type, '');
 begin
   select * into v_worker from public.frozen_ingredient_require_active_worker(p_worker_id);
 
@@ -381,6 +474,10 @@ begin
 
   if p_expiration_date is null then
     raise exception 'expiration date is required';
+  end if;
+
+  if v_date_type not in ('', '賞味期限', '消費期限') then
+    raise exception 'invalid date type';
   end if;
 
   perform 1
@@ -404,6 +501,7 @@ begin
   insert into public.frozen_ingredient_stock_lots (
     fridge_id,
     material_id,
+    date_type,
     expiration_date,
     quantity,
     received_at,
@@ -412,12 +510,13 @@ begin
   values (
     p_fridge_id,
     p_material_id,
+    v_date_type,
     p_expiration_date,
     p_quantity,
     now(),
     v_worker.worker_id
   )
-  on conflict (fridge_id, material_id, expiration_date)
+  on conflict (fridge_id, material_id, date_type, expiration_date)
   do update set
     quantity = public.frozen_ingredient_stock_lots.quantity + excluded.quantity,
     updated_at = now()
@@ -516,7 +615,7 @@ end;
 $$;
 
 revoke all on function public.frozen_ingredient_require_active_worker(text) from public, anon, authenticated;
-revoke all on function public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text) from public, anon, authenticated;
+revoke all on function public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text, text) from public, anon, authenticated;
 revoke all on function public.frozen_ingredient_record_outbound(text, uuid, numeric, text) from public, anon, authenticated;
 
 grant usage on schema public to anon;
@@ -526,7 +625,7 @@ grant select, insert, update on public.frozen_ingredient_fridges to anon;
 grant select, insert, update on public.frozen_ingredient_materials to anon;
 grant select on public.frozen_ingredient_stock_lots to anon;
 grant select on public.frozen_ingredient_stock_movements to anon;
-grant execute on function public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text) to anon;
+grant execute on function public.frozen_ingredient_record_inbound(text, uuid, uuid, date, numeric, text, text) to anon;
 grant execute on function public.frozen_ingredient_record_outbound(text, uuid, numeric, text) to anon;
 
 do $$

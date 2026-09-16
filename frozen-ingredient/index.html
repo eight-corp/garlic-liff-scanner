@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9f8">
   <title>資材 在庫管理</title>
-  <link rel="stylesheet" href="./styles.css?v=20260916-centered-table-headings">
+  <link rel="stylesheet" href="./styles.css?v=20260916-date-type-inbound-picker">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="../shared/business-config.js?v=20260915-common-login2"></script>
   <script src="../shared/business-auth.js?v=20260915-common-login2"></script>
-  <script src="./config.js?v=20260916-material-note"></script>
+  <script src="./config.js?v=20260916-date-type-inbound-picker"></script>
 </head>
 <body>
   <main class="page">
@@ -111,9 +111,17 @@
             <span>品目</span>
             <select id="inboundMaterial" required></select>
           </label>
+          <label>
+            <span>期限種別</span>
+            <select id="inboundDateType">
+              <option value="">空欄</option>
+              <option value="賞味期限">賞味期限</option>
+              <option value="消費期限">消費期限</option>
+            </select>
+          </label>
           <div class="two-columns">
             <label>
-              <span>期限/管理日</span>
+              <span id="inboundDateLabel">管理日</span>
               <input id="inboundExpiration" type="date" required>
             </label>
             <label>
@@ -128,10 +136,16 @@
             <span>メモ</span>
             <input id="inboundNote" type="text" maxlength="120" autocomplete="off">
           </label>
-          <button class="primary" type="submit">
-            <i data-lucide="save"></i>
-            入庫を登録
-          </button>
+          <div class="button-row">
+            <button class="primary" type="submit">
+              <i data-lucide="save"></i>
+              入庫を登録
+            </button>
+            <button id="clearInboundForm" class="secondary clear-inputs" type="button">
+              <i data-lucide="eraser"></i>
+              クリア
+            </button>
+          </div>
         </form>
         <div class="inbound-stock">
           <div class="section-title compact-title">
@@ -315,6 +329,14 @@
               <input id="materialUnit" type="text" maxlength="20" placeholder="kg、袋、個 など" value="kg" required>
             </label>
             <label>
+              <span>期限種別</span>
+              <select id="materialDateType">
+                <option value="">空欄</option>
+                <option value="賞味期限">賞味期限</option>
+                <option value="消費期限">消費期限</option>
+              </select>
+            </label>
+            <label>
               <span>備考</span>
               <input id="materialNote" type="text" maxlength="200" autocomplete="off">
             </label>
@@ -364,6 +386,6 @@
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="./app.js?v=20260916-material-note"></script>
+  <script src="./app.js?v=20260916-date-type-inbound-picker"></script>
 </body>
 </html>
