@@ -563,6 +563,7 @@ input[readonly] {
   background: #f4f7f5;
   color: var(--muted);
   font-weight: 850;
+  text-align: center;
 }
 
 .summary-table tr:last-child td {
