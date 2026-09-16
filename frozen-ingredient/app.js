@@ -11,7 +11,8 @@
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
+    'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote', 'fridgeInventoryList',
     'materialInventoryList', 'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
     'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm',
@@ -36,6 +37,7 @@
     workerId: getStore(WORKER_KEY) || '',
     activeCategoryId: getStore(CATEGORY_KEY) || '',
     activeTab: getStore(TAB_KEY) || 'inbound',
+    inboundStockMode: 'fridges',
     masterMode: 'categories',
     selectedLotId: '',
     workers: [],
@@ -100,6 +102,12 @@
     });
     el.inboundForm.addEventListener('submit', inbound);
     el.inboundMaterial.addEventListener('change', renderUnits);
+    document.querySelectorAll('[data-inbound-stock-mode]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.inboundStockMode = button.dataset.inboundStockMode === 'materials' ? 'materials' : 'fridges';
+        renderInboundStockMode();
+      });
+    });
     el.outboundForm.addEventListener('submit', outbound);
     el.outboundFridge.addEventListener('change', () => {
       state.selectedLotId = '';
@@ -521,6 +529,15 @@
   function renderInboundInventory() {
     el.inboundFridgeInventoryList.innerHTML = inboundFridgeInventoryHtml();
     el.inboundMaterialInventoryList.innerHTML = inboundMaterialInventoryHtml();
+    renderInboundStockMode();
+  }
+
+  function renderInboundStockMode() {
+    const materials = state.inboundStockMode === 'materials';
+    el.inboundStockFridgeTab.classList.toggle('active', !materials);
+    el.inboundStockMaterialTab.classList.toggle('active', materials);
+    el.inboundFridgeInventoryPanel.classList.toggle('hidden', materials);
+    el.inboundMaterialInventoryPanel.classList.toggle('hidden', !materials);
   }
 
   function renderMaterialInventory() {

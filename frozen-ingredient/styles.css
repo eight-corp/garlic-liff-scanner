@@ -370,15 +370,18 @@ input[readonly] {
   font-size: 0.98rem;
 }
 
-.stock-summary-block {
-  display: grid;
-  gap: 6px;
+.stock-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
 }
 
-.stock-summary-block > h3 {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
+.stock-tabs button {
+  min-height: 32px;
+}
+
+.stock-summary-panel {
+  display: grid;
+  gap: 6px;
 }
 
 .segmented {
