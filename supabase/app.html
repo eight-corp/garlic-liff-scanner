@@ -4685,7 +4685,9 @@
         selectAll('locations', query => query.order('cooler_id', { ascending: true }).order('level_no', { ascending: true }).order('row_no', { ascending: true }).order('col_no', { ascending: true })),
         selectAll('producers', query => query.order('producer_no', { ascending: true })),
         selectAll('pallets', query => query.order('pallet_no', { ascending: true })),
-        selectAll('pallet_detail_view', query => query.order('pallet_no', { ascending: true }).order('detail_no', { ascending: true })),
+        // Producer names are resolved client-side from the producer master.
+        // Reading the base table avoids the regex join in pallet_detail_view timing out.
+        selectAll('pallet_details', query => query.order('pallet_no', { ascending: true }).order('detail_no', { ascending: true })),
         selectAll('placements', query => query.order('location_id', { ascending: true })),
         selectAll('moving_pallets', query => query.order('started_at', { ascending: true })),
         optionalSelectAll('app_settings')
