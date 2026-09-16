@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9f8">
   <title>資材 在庫管理</title>
-  <link rel="stylesheet" href="./styles.css?v=20260916-outbound-category">
+  <link rel="stylesheet" href="./styles.css?v=20260916-material-note">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="../shared/business-config.js?v=20260915-common-login2"></script>
   <script src="../shared/business-auth.js?v=20260915-common-login2"></script>
-  <script src="./config.js?v=20260916-outbound-category"></script>
+  <script src="./config.js?v=20260916-material-note"></script>
 </head>
 <body>
   <main class="page">
@@ -314,6 +314,10 @@
               <span>単位</span>
               <input id="materialUnit" type="text" maxlength="20" placeholder="kg、袋、個 など" value="kg" required>
             </label>
+            <label>
+              <span>備考</span>
+              <input id="materialNote" type="text" maxlength="200" autocomplete="off">
+            </label>
             <label class="check-row">
               <input id="materialActive" type="checkbox" checked>
               <span>使用中</span>
@@ -360,6 +364,6 @@
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="./app.js?v=20260916-outbound-category"></script>
+  <script src="./app.js?v=20260916-material-note"></script>
 </body>
 </html>

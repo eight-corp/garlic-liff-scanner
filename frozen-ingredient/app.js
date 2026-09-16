@@ -20,7 +20,7 @@
     'categoryForm', 'categoryId', 'categoryName', 'categoryDisplayOrder', 'categoryActive', 'clearCategoryForm', 'clearCategoryInputs',
     'categoryMasterList', 'fridgeForm', 'fridgeId',
     'fridgeName', 'fridgeNote', 'fridgeActive', 'clearFridgeForm', 'clearFridgeInputs', 'fridgeMasterList', 'materialForm',
-    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialActive', 'clearMaterialForm', 'clearMaterialInputs',
+    'materialId', 'materialCategory', 'supplierName', 'materialName', 'materialUnit', 'materialNote', 'materialActive', 'clearMaterialForm', 'clearMaterialInputs',
     'materialMasterList', 'toast'
   ];
   const panels = {
@@ -444,6 +444,7 @@
       supplier_name: clean(el.supplierName.value),
       material_name: clean(el.materialName.value),
       unit_name: clean(el.materialUnit.value),
+      note: clean(el.materialNote.value) || null,
       is_active: el.materialActive.checked
     };
     if (!values.category_id || !values.supplier_name || !values.material_name || !values.unit_name) return toast('品目内容を確認してください。', 'error');
@@ -591,7 +592,7 @@
       if (fridgeId !== ALL_CATEGORIES && lot.fridge_id !== fridgeId) return false;
       if (categoryId !== ALL_CATEGORIES && material.category_id !== categoryId) return false;
       if (!query) return true;
-      return `${material.material_name || ''} ${material.supplier_name || ''}`.toLocaleLowerCase('ja').includes(query);
+      return `${material.material_name || ''} ${material.supplier_name || ''} ${material.note || ''}`.toLocaleLowerCase('ja').includes(query);
     });
     const groups = groupBy(lots, (lot) => lot.material_id);
     const materials = sortMaterials(Array.from(groups.keys()).map((id) => state.materials.find((material) => material.id === id)).filter(Boolean));
@@ -612,8 +613,9 @@
   }
 
   function inventoryRow(material, lots) {
+    const note = clean(material.note);
     return `<tr>
-      <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div></td>
+      <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div>${note ? `<div class="stock-sub">備考: ${esc(note)}</div>` : ''}</td>
       <td><span class="category-pill">${esc(categoryName(material.category_id) || '-')}</span></td>
       <td>${inventoryLocationDetails(lots, material)}</td>
       <td class="quantity inventory-total">${esc(qtyUnit(sum(lots), material))}</td>
@@ -794,8 +796,9 @@
   }
 
   function materialMasterRow(material) {
+    const note = clean(material.note);
     return `<tr>
-      <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div></td>
+      <td><div class="stock-title">${esc(material.material_name)}</div><div class="stock-sub">${esc(material.supplier_name || '')}</div>${note ? `<div class="stock-sub">備考: ${esc(note)}</div>` : ''}</td>
       <td class="quantity">${esc(unitName(material) || '-')}</td>
       <td class="master-action-cell"><div class="master-table-actions"><span class="state-pill ${material.is_active ? 'active' : 'paused'}">${material.is_active ? '使用中' : '停止中'}</span><button class="icon-button" type="button" data-edit-material="${esc(material.id)}" aria-label="編集" title="編集"><i data-lucide="pencil"></i></button></div></td>
     </tr>`;
@@ -888,6 +891,7 @@
     el.supplierName.value = material.supplier_name || '';
     el.materialName.value = material.material_name || '';
     el.materialUnit.value = material.unit_name || 'kg';
+    el.materialNote.value = material.note || '';
     el.materialActive.checked = Boolean(material.is_active);
     el.supplierName.focus();
   }
@@ -912,6 +916,7 @@
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = 'kg';
+    el.materialNote.value = '';
     el.materialActive.checked = true;
   }
 
@@ -936,6 +941,7 @@
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = '';
+    el.materialNote.value = '';
     el.materialActive.checked = true;
     el.supplierName.focus();
   }
@@ -1107,7 +1113,9 @@
   function materialMeta(material) {
     if (!material) return '';
     const unit = unitName(material);
-    return `${materialCategoryPrefix(material)}${unit ? `${material.supplier_name} / ${unit}` : material.supplier_name}`;
+    const base = `${materialCategoryPrefix(material)}${unit ? `${material.supplier_name} / ${unit}` : material.supplier_name}`;
+    const note = clean(material.note);
+    return note ? `${base} / 備考: ${note}` : base;
   }
   function materialEmptyText(suffix = '') {
     return state.activeCategoryId === ALL_CATEGORIES ? `品目が未登録です${suffix}` : `このカテゴリの品目が未登録です${suffix}`;
@@ -1193,6 +1201,7 @@
     if (text.includes('active fridge not found')) return '使用中の保管場所を選択してください。';
     if (text.includes('active material not found')) return '使用中の品目を選択してください。';
     if (text.includes('duplicate key')) return '同じ内容がすでに登録されています。';
+    if (text.includes('schema cache') && text.includes('frozen_ingredient_materials') && text.includes('note')) return '品目備考追加SQLが未実行です。supabase-add-material-note.sqlをSupabase SQL Editorで実行してください。';
     if (text.includes('inventory_item_categories') || text.includes('category_id')) return 'カテゴリ追加SQLが未実行です。supabase-add-inventory-categories.sqlをSupabase SQL Editorで実行してください。';
     if (text.includes('frozen_ingredient_record_inbound')) return '入出庫RPCのSQLセットアップを確認してください。';
     return text || '処理に失敗しました。';

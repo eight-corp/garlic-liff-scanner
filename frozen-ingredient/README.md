@@ -14,7 +14,7 @@ https://eight-corp.github.io/garlic-liff-scanner/frozen-ingredient/
 - カテゴリ別の在庫管理: ダンボール、カップ、シール、冷食など
 - 保管場所マスタの追加、編集、使用停止
 - 品目マスタの追加、編集、使用停止
-- 品目マスタで仕入先、品目名、数量単位を直接入力
+- 品目マスタで仕入先、品目名、数量単位、備考を直接入力
 - 入庫登録: 保管場所、品目、期限/管理日、数量を登録
 - 出庫登録: 保管場所と品目から現在庫ロットを選び、数量を登録
 - 保管場所別の現在庫一覧
@@ -53,6 +53,6 @@ https://eight-corp.github.io/garlic-liff-scanner/frozen-ingredient/
 
 作業者は、にんにく冷蔵庫管理と同じ `workers` テーブルを使います。
 
-品目マスタには `category_id` と `unit_name` があり、カテゴリと `kg`、`袋`、`個` などの単位を管理できます。
+品目マスタには `category_id`、`unit_name`、`note` があり、カテゴリ、`kg`、`袋`、`個` などの単位、備考を管理できます。既存テーブルへ備考を追加する場合は `supabase-add-material-note.sql` を実行します。
 
 入出庫登録用のRPC関数は `frozen_ingredient_record_inbound` と `frozen_ingredient_record_outbound` です。どちらも `p_worker_id` を受け取り、作業者が有効か確認してから登録します。
