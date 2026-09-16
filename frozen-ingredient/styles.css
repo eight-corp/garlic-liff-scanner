@@ -292,7 +292,7 @@ input[readonly] {
 
 .status-row {
   display: grid;
-  grid-template-columns: auto minmax(116px, 1.2fr) minmax(86px, 0.8fr);
+  grid-template-columns: auto minmax(120px, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 0 8px;
@@ -686,16 +686,14 @@ input[readonly] {
 
 @media (max-width: 430px) {
   .status-row {
-    grid-template-columns: auto minmax(112px, 1fr) minmax(82px, 0.75fr);
+    grid-template-columns: auto minmax(96px, 1fr);
   }
 
-  .category-switch,
-  .worker-switch {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .category-switch span,
   .worker-switch span {
     display: none;
+  }
+
+  .worker-switch {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
