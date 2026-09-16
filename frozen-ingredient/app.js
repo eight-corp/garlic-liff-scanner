@@ -3,6 +3,7 @@
 
   const CONFIG_KEY = 'reishoku.supabase.config.v1';
   const APP_ID = 'frozen_ingredients';
+  const ALL_CATEGORIES = '__all__';
   const TAB_KEY = 'reishoku.active.tab.v1';
   const CATEGORY_KEY = 'reishoku.active.category.v1';
   const WORKER_KEY = 'reishoku.workerId';
@@ -425,7 +426,7 @@
     if (!canUse('admin')) return toast('マスタ管理は管理者権限が必要です。', 'error');
     const id = el.materialId.value;
     const values = {
-      category_id: el.materialCategory.value || state.activeCategoryId,
+      category_id: el.materialCategory.value || materialFormCategoryId(),
       supplier_name: clean(el.supplierName.value),
       material_name: clean(el.materialName.value),
       unit_name: clean(el.materialUnit.value),
@@ -474,7 +475,7 @@
     const activeFridges = sortName(state.fridges.filter((item) => item.is_active));
     const activeMaterials = sortMaterials(state.materials.filter((item) => item.is_active && inCurrentCategory(item)));
     fillSelect(el.inboundFridge, activeFridges, (item) => item.name, '保管場所が未登録です');
-    fillSelect(el.inboundMaterial, activeMaterials, materialLabel, 'このカテゴリの品目が未登録です');
+    fillSelect(el.inboundMaterial, activeMaterials, materialLabel, materialEmptyText());
     const fridgeIds = new Set(activeLots().map((lot) => lot.fridge_id));
     fillSelect(el.outboundFridge, sortName(state.fridges.filter((item) => fridgeIds.has(item.id))), (item) => item.name, '出庫できる在庫がありません');
     renderOutboundMaterials();
@@ -570,7 +571,7 @@
         .map((row) => summaryRow(materialName(row.material), materialMeta(row.material), qtyUnit(sum(row.lots), row.material), expiryChips(row.lots, row.material)))
         .join('');
       return summaryGroup(fridge.name, fridgeSummary(lots), ['品目', '数量', '期限/管理日'], rows);
-    }).join('') || '<div class="empty-row">このカテゴリの現在庫がありません。</div>';
+    }).join('') || `<div class="empty-row">${esc(currentStockEmptyText())}</div>`;
   }
 
   function inboundMaterialInventoryHtml() {
@@ -585,7 +586,7 @@
         .map((row) => summaryRow(fridgeName(row.fridge), '', qtyUnit(sum(row.lots), material), expiryChips(row.lots, material)))
         .join('');
       return summaryGroup(material.material_name, qtyUnit(sum(lots), material), ['保管場所', '数量', '期限/管理日'], rows, materialMeta(material));
-    }).join('') || '<div class="empty-row">このカテゴリの現在庫がありません。</div>';
+    }).join('') || `<div class="empty-row">${esc(currentStockEmptyText())}</div>`;
   }
 
   function summaryGroup(title, quantity, headers, rows, sub) {
@@ -644,18 +645,22 @@
       fillMaterialCategory([]);
       return;
     }
-    if (!categories.some((category) => category.id === previous)) {
+    if (previous === ALL_CATEGORIES) {
+      state.activeCategoryId = ALL_CATEGORIES;
+    } else if (!categories.some((category) => category.id === previous)) {
       state.activeCategoryId = preferredCategoryId(categories);
       setStore(CATEGORY_KEY, state.activeCategoryId);
     }
     el.categorySelect.disabled = false;
+    el.categorySelect.append(new Option('全て', ALL_CATEGORIES));
     categories.forEach((category) => el.categorySelect.append(new Option(category.name, category.id)));
     el.categorySelect.value = state.activeCategoryId;
     fillMaterialCategory(categories);
   }
 
   function fillMaterialCategory(categories) {
-    const previous = el.materialCategory.value || state.activeCategoryId;
+    const fallback = materialFormCategoryId(categories);
+    const previous = el.materialCategory.value || fallback;
     el.materialCategory.innerHTML = '';
     if (!categories.length) {
       const option = new Option('カテゴリ未登録', '');
@@ -667,7 +672,7 @@
     }
     el.materialCategory.disabled = false;
     categories.forEach((category) => el.materialCategory.append(new Option(category.name, category.id)));
-    el.materialCategory.value = categories.some((category) => category.id === previous) ? previous : categories[0].id;
+    el.materialCategory.value = categories.some((category) => category.id === previous) ? previous : fallback;
   }
 
   function renderMasterMode() {
@@ -680,7 +685,7 @@
   function renderMasterLists() {
     el.categoryMasterList.innerHTML = sortCategories(state.categories).map((category) => masterItem(category.name, `表示順 ${category.display_order || 999}`, category.is_active, 'category', category.id)).join('') || '<div class="empty-row">カテゴリが未登録です。</div>';
     el.fridgeMasterList.innerHTML = sortName(state.fridges).map((fridge) => masterItem(fridge.name, fridge.note, fridge.is_active, 'fridge', fridge.id)).join('') || '<div class="empty-row">保管場所が未登録です。</div>';
-    el.materialMasterList.innerHTML = sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => masterItem(material.material_name, materialMeta(material), material.is_active, 'material', material.id)).join('') || '<div class="empty-row">このカテゴリの品目が未登録です。</div>';
+    el.materialMasterList.innerHTML = sortMaterials(state.materials.filter(inCurrentCategory)).map((material) => masterItem(material.material_name, materialMeta(material), material.is_active, 'material', material.id)).join('') || `<div class="empty-row">${esc(materialEmptyText('。'))}</div>`;
   }
 
   function masterItem(title, sub, active, kind, id) {
@@ -773,7 +778,7 @@
     const material = state.materials.find((item) => item.id === button.dataset.editMaterial);
     if (!material) return;
     el.materialId.value = material.id;
-    el.materialCategory.value = material.category_id || state.activeCategoryId;
+    el.materialCategory.value = material.category_id || materialFormCategoryId();
     el.supplierName.value = material.supplier_name || '';
     el.materialName.value = material.material_name || '';
     el.materialUnit.value = material.unit_name || 'kg';
@@ -797,7 +802,7 @@
 
   function resetMaterialForm() {
     el.materialId.value = '';
-    el.materialCategory.value = state.activeCategoryId || '';
+    el.materialCategory.value = materialFormCategoryId();
     el.supplierName.value = '';
     el.materialName.value = '';
     el.materialUnit.value = 'kg';
@@ -889,6 +894,7 @@
       removeStore(CATEGORY_KEY);
       return;
     }
+    if (state.activeCategoryId === ALL_CATEGORIES) return;
     if (!categories.some((category) => category.id === state.activeCategoryId)) {
       state.activeCategoryId = preferredCategoryId(categories);
       setStore(CATEGORY_KEY, state.activeCategoryId);
@@ -901,6 +907,12 @@
     const frozen = categories.find((category) => category.name === '冷食');
     return (frozen || categories[0]).id;
   }
+  function materialFormCategoryId(categories = activeCategories()) {
+    if (state.activeCategoryId && state.activeCategoryId !== ALL_CATEGORIES && categories.some((category) => category.id === state.activeCategoryId)) {
+      return state.activeCategoryId;
+    }
+    return categories.length ? preferredCategoryId(categories) : '';
+  }
   function excludedCategory(name) {
     return ['にんにく', '黒にんにく', '米穀', '玄米', '白米'].includes(clean(name));
   }
@@ -908,7 +920,11 @@
     return state.lots.filter((lot) => Number(lot.quantity) > 0 && inCurrentCategory(materialFor(lot)));
   }
   function inCurrentCategory(material) {
-    return Boolean(state.activeCategoryId && material && material.category_id === state.activeCategoryId);
+    if (!material) return false;
+    if (state.activeCategoryId === ALL_CATEGORIES) {
+      return activeCategories().some((category) => category.id === material.category_id);
+    }
+    return Boolean(state.activeCategoryId && material.category_id === state.activeCategoryId);
   }
   function renderUnits() {
     const inboundMaterial = state.materials.find((item) => item.id === el.inboundMaterial.value);
@@ -923,15 +939,30 @@
     return state.fridges.find((item) => item.id === lot.fridge_id) || lot.fridge || null;
   }
   function fridgeName(fridge) { return fridge ? fridge.name : '保管場所不明'; }
+  function categoryName(categoryId) {
+    const category = state.categories.find((item) => item.id === categoryId);
+    return category ? category.name : '';
+  }
+  function materialCategoryPrefix(material) {
+    if (state.activeCategoryId !== ALL_CATEGORIES) return '';
+    const name = categoryName(material && material.category_id);
+    return name ? `${name} / ` : '';
+  }
   function materialLabel(material) {
     const unit = unitName(material);
-    return `${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
+    return `${materialCategoryPrefix(material)}${material.supplier_name} / ${material.material_name}${unit ? `（${unit}）` : ''}`;
   }
   function materialName(material) { return material ? material.material_name : '品目不明'; }
   function materialMeta(material) {
     if (!material) return '';
     const unit = unitName(material);
-    return unit ? `${material.supplier_name} / ${unit}` : material.supplier_name;
+    return `${materialCategoryPrefix(material)}${unit ? `${material.supplier_name} / ${unit}` : material.supplier_name}`;
+  }
+  function materialEmptyText(suffix = '') {
+    return state.activeCategoryId === ALL_CATEGORIES ? `品目が未登録です${suffix}` : `このカテゴリの品目が未登録です${suffix}`;
+  }
+  function currentStockEmptyText() {
+    return state.activeCategoryId === ALL_CATEGORIES ? '現在庫がありません。' : 'このカテゴリの現在庫がありません。';
   }
   function unitName(material) {
     return clean(material && material.unit_name);
