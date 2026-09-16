@@ -35,7 +35,7 @@
     commonSession: null,
     loggedIn: false,
     workerId: getStore(WORKER_KEY) || '',
-    activeCategoryId: getStore(CATEGORY_KEY) || '',
+    activeCategoryId: '',
     activeTab: getStore(TAB_KEY) || 'inbound',
     inboundStockMode: 'fridges',
     masterMode: 'categories',
