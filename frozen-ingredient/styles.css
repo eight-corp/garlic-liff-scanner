@@ -213,6 +213,31 @@ input[readonly] {
   gap: 8px;
 }
 
+.inbound-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 5px;
+}
+
+.inbound-detail-row label,
+.inbound-detail-row input,
+.inbound-detail-row select,
+.inbound-detail-row .input-with-unit {
+  min-width: 0;
+}
+
+.inbound-detail-row input,
+.inbound-detail-row select {
+  padding-right: 6px;
+  padding-left: 6px;
+  font-size: 0.78rem;
+}
+
+.inbound-detail-row .unit-suffix {
+  padding: 0 6px;
+  font-size: 0.7rem;
+}
+
 .button-row,
 .header-actions,
 .inline-form {
@@ -382,15 +407,6 @@ input[readonly] {
 
 .compact-title h2 {
   font-size: 0.98rem;
-}
-
-.stock-tabs {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 3px;
-}
-
-.stock-tabs button {
-  min-height: 32px;
 }
 
 .stock-summary-panel {

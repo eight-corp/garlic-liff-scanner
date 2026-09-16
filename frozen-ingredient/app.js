@@ -12,8 +12,8 @@
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundDateType', 'inboundDateLabel', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'clearInboundForm', 'inboundStockFridgeTab', 'inboundStockMaterialTab',
-    'inboundFridgeInventoryPanel', 'inboundMaterialInventoryPanel', 'inboundFridgeInventoryList', 'inboundMaterialInventoryList', 'outboundForm', 'outboundFridge', 'outboundCategory', 'outboundMaterial',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'clearInboundForm', 'inboundMaterialInventoryList',
+    'outboundForm', 'outboundFridge', 'outboundCategory', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote',
     'inventoryFridgeFilter', 'inventoryCategoryFilter', 'inventoryMaterialSearch', 'inventoryResultCount', 'inventoryList',
     'categoryMasterPanel', 'fridgeMasterPanel', 'materialMasterPanel',
@@ -38,7 +38,6 @@
     workerId: getStore(WORKER_KEY) || '',
     activeCategoryId: '',
     activeTab: getStore(TAB_KEY) || 'inbound',
-    inboundStockMode: 'fridges',
     masterMode: 'categories',
     selectedLotId: '',
     workers: [],
@@ -105,18 +104,10 @@
     el.inboundMaterial.addEventListener('change', applyInboundMaterialDefaults);
     el.inboundDateType.addEventListener('change', renderInboundDateLabel);
     el.clearInboundForm.addEventListener('click', clearInboundEntry);
-    document.querySelectorAll('[data-inbound-stock-mode]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.inboundStockMode = button.dataset.inboundStockMode === 'materials' ? 'materials' : 'fridges';
-        renderInboundStockMode();
-      });
-    });
-    [el.inboundFridgeInventoryList, el.inboundMaterialInventoryList].forEach((list) => {
-      list.addEventListener('click', loadInboundFromStockRow);
-      list.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        loadInboundFromStockRow(event);
-      });
+    el.inboundMaterialInventoryList.addEventListener('click', loadInboundFromStockRow);
+    el.inboundMaterialInventoryList.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      loadInboundFromStockRow(event);
     });
     el.inventoryFridgeFilter.addEventListener('change', renderInventory);
     el.inventoryCategoryFilter.addEventListener('change', renderInventory);
@@ -646,17 +637,7 @@
   }
 
   function renderInboundInventory() {
-    el.inboundFridgeInventoryList.innerHTML = inboundFridgeInventoryHtml();
     el.inboundMaterialInventoryList.innerHTML = inboundMaterialInventoryHtml();
-    renderInboundStockMode();
-  }
-
-  function renderInboundStockMode() {
-    const materials = state.inboundStockMode === 'materials';
-    el.inboundStockFridgeTab.classList.toggle('active', !materials);
-    el.inboundStockMaterialTab.classList.toggle('active', materials);
-    el.inboundFridgeInventoryPanel.classList.toggle('hidden', materials);
-    el.inboundMaterialInventoryPanel.classList.toggle('hidden', !materials);
   }
 
   function clearInboundEntry() {
@@ -691,19 +672,6 @@
     el.inboundForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
     el.inboundExpiration.focus({ preventScroll: true });
     toast('品目を入庫入力へ反映しました。');
-  }
-
-  function inboundFridgeInventoryHtml() {
-    const materials = inboundMaterials();
-    const fridges = sortName(state.fridges.filter((fridge) => fridge.is_active));
-    if (!materials.length) return `<div class="empty-row">${esc(materialEmptyText())}</div>`;
-    if (!fridges.length) return '<div class="empty-row">保管場所が未登録です。</div>';
-    const lots = activeLots().sort(compareLotsForFridge);
-    return fridges.map((fridge) => {
-      const fridgeLots = lots.filter((lot) => lot.fridge_id === fridge.id);
-      const rows = materials.map((material) => inboundStockRow(material, fridge, fridgeLots.filter((lot) => lot.material_id === material.id))).join('');
-      return summaryGroup(fridge.name, fridgeSummary(fridgeLots), ['品目', '数量', '期限/管理日'], rows);
-    }).join('');
   }
 
   function inboundMaterialInventoryHtml() {

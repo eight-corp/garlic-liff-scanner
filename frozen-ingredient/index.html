@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9f8">
   <title>資材 在庫管理</title>
-  <link rel="stylesheet" href="./styles.css?v=20260916-date-type-inbound-picker">
+  <link rel="stylesheet" href="./styles.css?v=20260916-material-only-stock">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="../shared/business-config.js?v=20260915-common-login2"></script>
   <script src="../shared/business-auth.js?v=20260915-common-login2"></script>
-  <script src="./config.js?v=20260916-date-type-inbound-picker"></script>
+  <script src="./config.js?v=20260916-material-only-stock"></script>
 </head>
 <body>
   <main class="page">
@@ -111,15 +111,15 @@
             <span>品目</span>
             <select id="inboundMaterial" required></select>
           </label>
-          <label>
-            <span>期限種別</span>
-            <select id="inboundDateType">
-              <option value="">空欄</option>
-              <option value="賞味期限">賞味期限</option>
-              <option value="消費期限">消費期限</option>
-            </select>
-          </label>
-          <div class="two-columns">
+          <div class="inbound-detail-row">
+            <label>
+              <span>期限種別</span>
+              <select id="inboundDateType">
+                <option value="">空欄</option>
+                <option value="賞味期限">賞味期限</option>
+                <option value="消費期限">消費期限</option>
+              </select>
+            </label>
             <label>
               <span id="inboundDateLabel">管理日</span>
               <input id="inboundExpiration" type="date" required>
@@ -152,14 +152,7 @@
             <i data-lucide="list-checks"></i>
             <h2>現在庫</h2>
           </div>
-          <div class="segmented stock-tabs" role="tablist" aria-label="現在庫表示">
-            <button id="inboundStockFridgeTab" class="active" type="button" data-inbound-stock-mode="fridges">場所別</button>
-            <button id="inboundStockMaterialTab" type="button" data-inbound-stock-mode="materials">品目別</button>
-          </div>
-          <div id="inboundFridgeInventoryPanel" class="stock-summary-panel">
-            <div id="inboundFridgeInventoryList" class="inventory-list"></div>
-          </div>
-          <div id="inboundMaterialInventoryPanel" class="stock-summary-panel hidden">
+          <div class="stock-summary-panel">
             <div id="inboundMaterialInventoryList" class="inventory-list"></div>
           </div>
         </div>
@@ -386,6 +379,6 @@
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="./app.js?v=20260916-date-type-inbound-picker"></script>
+  <script src="./app.js?v=20260916-material-only-stock"></script>
 </body>
 </html>
