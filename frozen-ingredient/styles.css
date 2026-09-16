@@ -400,7 +400,7 @@ input[readonly] {
   gap: 8px;
 }
 
-.inbound-stock {
+.inbound-material-picker {
   display: grid;
   gap: 8px;
 }
@@ -409,9 +409,14 @@ input[readonly] {
   font-size: 0.98rem;
 }
 
-.stock-summary-panel {
+.inbound-material-list-panel {
   display: grid;
   gap: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 .inventory-filters {
@@ -586,24 +591,39 @@ input[readonly] {
   border-bottom: 0;
 }
 
-.selectable-stock-row {
+.inbound-material-table {
+  min-width: 360px;
+}
+
+.inbound-material-table th:first-child,
+.inbound-material-table td:first-child {
+  width: 62%;
+}
+
+.inbound-material-table th:nth-child(2),
+.inbound-material-table td:nth-child(2) {
+  width: 16%;
+  text-align: center;
+}
+
+.inbound-material-table th:last-child,
+.inbound-material-table td:last-child {
+  width: 22%;
+  text-align: center;
+}
+
+.selectable-material-row {
   cursor: pointer;
 }
 
-.selectable-stock-row:hover,
-.selectable-stock-row:focus-visible {
+.selectable-material-row:hover,
+.selectable-material-row:focus-visible {
   background: var(--accent-soft);
   outline: none;
 }
 
-.selectable-stock-row:active {
+.selectable-material-row:active {
   background: #caeae4;
-}
-
-.zero-stock {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
 }
 
 .inventory-table {

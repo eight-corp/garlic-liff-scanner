@@ -12,7 +12,7 @@
     'setupScreen', 'authScreen', 'appShell', 'setupForm', 'setupUrl', 'setupAnonKey',
     'authForm', 'loginWorkerSelect', 'loginPin', 'loginMessage', 'refreshButton', 'signOutButton',
     'syncStatus', 'categorySelect', 'workerSelect', 'inboundForm', 'inboundFridge', 'inboundMaterial', 'inboundDateType', 'inboundDateLabel', 'inboundExpiration',
-    'inboundQuantity', 'inboundUnit', 'inboundNote', 'clearInboundForm', 'inboundMaterialInventoryList',
+    'inboundQuantity', 'inboundUnit', 'inboundNote', 'clearInboundForm', 'inboundMaterialList',
     'outboundForm', 'outboundFridge', 'outboundCategory', 'outboundMaterial',
     'outboundLotList', 'outboundQuantity', 'outboundUnit', 'outboundAvailable', 'outboundNote',
     'inventoryFridgeFilter', 'inventoryCategoryFilter', 'inventoryMaterialSearch', 'inventoryResultCount', 'inventoryList',
@@ -104,10 +104,10 @@
     el.inboundMaterial.addEventListener('change', applyInboundMaterialDefaults);
     el.inboundDateType.addEventListener('change', renderInboundDateLabel);
     el.clearInboundForm.addEventListener('click', clearInboundEntry);
-    el.inboundMaterialInventoryList.addEventListener('click', loadInboundFromStockRow);
-    el.inboundMaterialInventoryList.addEventListener('keydown', (event) => {
+    el.inboundMaterialList.addEventListener('click', loadInboundFromMaterialRow);
+    el.inboundMaterialList.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
-      loadInboundFromStockRow(event);
+      loadInboundFromMaterialRow(event);
     });
     el.inventoryFridgeFilter.addEventListener('change', renderInventory);
     el.inventoryCategoryFilter.addEventListener('change', renderInventory);
@@ -465,7 +465,7 @@
     renderCategories();
     renderTabs();
     renderSelects();
-    renderInboundInventory();
+    renderInboundMaterialList();
     renderInventoryFilters();
     renderInventory();
     renderMasterMode();
@@ -636,8 +636,8 @@
       </div>`).join('');
   }
 
-  function renderInboundInventory() {
-    el.inboundMaterialInventoryList.innerHTML = inboundMaterialInventoryHtml();
+  function renderInboundMaterialList() {
+    el.inboundMaterialList.innerHTML = inboundMaterialListHtml();
   }
 
   function clearInboundEntry() {
@@ -648,7 +648,7 @@
     el.inboundExpiration.focus();
   }
 
-  function loadInboundFromStockRow(event) {
+  function loadInboundFromMaterialRow(event) {
     const row = event.target.closest('[data-inbound-material-id]');
     if (!row) return;
     if (event.type === 'keydown') event.preventDefault();
@@ -658,9 +658,6 @@
     setStore(CATEGORY_KEY, state.activeCategoryId);
     renderCategories();
     renderSelects();
-    if (Array.from(el.inboundFridge.options).some((option) => option.value === row.dataset.inboundFridgeId)) {
-      el.inboundFridge.value = row.dataset.inboundFridgeId;
-    }
     if (Array.from(el.inboundMaterial.options).some((option) => option.value === material.id)) {
       el.inboundMaterial.value = material.id;
     }
@@ -668,37 +665,36 @@
     el.inboundExpiration.value = '';
     el.inboundQuantity.value = '';
     el.inboundNote.value = '';
-    renderInboundInventory();
+    renderInboundMaterialList();
     el.inboundForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
     el.inboundExpiration.focus({ preventScroll: true });
     toast('品目を入庫入力へ反映しました。');
   }
 
-  function inboundMaterialInventoryHtml() {
+  function inboundMaterialListHtml() {
     const materials = inboundMaterials();
-    const fridges = sortName(state.fridges.filter((fridge) => fridge.is_active));
     if (!materials.length) return `<div class="empty-row">${esc(materialEmptyText())}</div>`;
-    if (!fridges.length) return '<div class="empty-row">保管場所が未登録です。</div>';
-    const groups = groupBy(activeLots().sort(compareLotsForMaterial), (lot) => lot.material_id);
-    return materials.map((material) => {
-      const lots = groups.get(material.id) || [];
-      const rows = fridges.map((fridge) => inboundStockRow(material, fridge, lots.filter((lot) => lot.fridge_id === fridge.id), 'fridge')).join('');
-      return summaryGroup(material.material_name, qtyUnit(sum(lots), material), ['保管場所', '数量', '期限/管理日'], rows, materialMeta(material));
-    }).join('');
+    const rows = materials.map(inboundMaterialRow).join('');
+    return `<div class="summary-table-wrap">
+      <table class="summary-table inbound-material-table">
+        <thead><tr><th>品目</th><th>単位</th><th>期限種別</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
   }
 
   function inboundMaterials() {
     return sortMaterials(state.materials.filter((material) => material.is_active && inCurrentCategory(material)));
   }
 
-  function inboundStockRow(material, fridge, lots, titleMode = 'material') {
-    const title = titleMode === 'fridge' ? fridgeName(fridge) : materialName(material);
-    const sub = titleMode === 'fridge' ? '' : materialMeta(material);
-    const detail = lots.length ? expiryChips(lots, material) : '<span class="zero-stock">在庫なし</span>';
-    return `<tr class="selectable-stock-row" tabindex="0" role="button" data-inbound-material-id="${esc(material.id)}" data-inbound-fridge-id="${esc(fridge.id)}" aria-label="${esc(`${title}を入庫入力へ反映`)}">
-      <td><div class="stock-title">${esc(title)}</div>${sub ? `<div class="stock-sub">${esc(sub)}</div>` : ''}</td>
-      <td class="quantity">${esc(qtyUnit(sum(lots), material))}</td>
-      <td><div class="stock-meta summary-meta">${detail}</div></td>
+  function inboundMaterialRow(material) {
+    const note = clean(material.note);
+    const category = categoryName(material.category_id);
+    const sub = [material.supplier_name, category].filter(Boolean).join(' / ');
+    return `<tr class="selectable-material-row" tabindex="0" role="button" data-inbound-material-id="${esc(material.id)}" aria-label="${esc(`${materialName(material)}を入庫入力へ反映`)}">
+      <td><div class="stock-title">${esc(materialName(material))}</div>${sub ? `<div class="stock-sub">${esc(sub)}</div>` : ''}${note ? `<div class="stock-sub">備考: ${esc(note)}</div>` : ''}</td>
+      <td class="quantity">${esc(unitName(material) || '-')}</td>
+      <td>${esc(dateTypeLabel(material.date_type, '空欄'))}</td>
     </tr>`;
   }
 
