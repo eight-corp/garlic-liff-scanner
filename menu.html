@@ -28,6 +28,7 @@
     .shipping { --accent: #7b4b2a; --tint: #f8eee7; }
     .dry { --accent: #9a6922; --tint: #fff5e4; }
     .frozen { --accent: #247a7c; --tint: #eaf7f5; }
+    .statement { --accent: #8a5e22; --tint: #fff4df; }
     .rice { --accent: #507238; --tint: #eff5e8; }
     button.card.pending { width: 100%; margin: 0; text-align: left; opacity: 1; cursor: not-allowed; }
     button.card.pending:hover { transform: none; border-color: #dce3dd; box-shadow: 0 3px 10px #20382a05; }
@@ -96,6 +97,12 @@
         <h2>資材在庫管理</h2>
         <p class="description">カテゴリ別の入出庫・保管場所別の在庫確認</p>
         <span class="open">管理画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
+      </a>
+      <a class="card statement" data-app="rice_shipping" data-min-role="operator" href="https://eight-corp.github.io/flexcon-trace/?openExternalBrowser=1&amp;view=statement-reader" target="_blank" rel="noopener noreferrer">
+        <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h9l4 4v16H6zM14 2v5h5M9 12h7M9 16h7"/><path d="M3 8V5h3m12 0h3v3M3 16v3h3m12 0h3v-3"/></svg></span>
+        <h2>仕切書読込み</h2>
+        <p class="description">仕切書を撮影し、明細と仕入価格を読み取って登録</p>
+        <span class="open">読込み画面を開く <span class="arrow" aria-hidden="true">↗</span></span>
       </a>
       <a class="card rice" data-app="rice_shipping" href="https://eight-corp.github.io/flexcon-trace/?openExternalBrowser=1" target="_blank" rel="noopener noreferrer">
         <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22V5m0 6C6 11 5 7 5 5c5 0 7 3 7 6Zm0 6c-6 0-7-4-7-6 5 0 7 3 7 6Zm0-6c6 0 7-4 7-6-5 0-7 3-7 6Zm0 6c6 0 7-4 7-6-5 0-7 3-7 6Zm0-12c-3-2 0-4 0-4s3 2 0 4Z"/></svg></span>
