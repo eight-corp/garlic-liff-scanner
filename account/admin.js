@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 let current=null,data=null,pinTargetFormId='',statusTimer=0;
 const roleOptions=[['','利用不可'],['admin','管理者'],['operator','作業者'],['viewer','閲覧者']];
-const shortNames={garlic_fridge:'冷蔵庫',black_garlic:'室管理',black_garlic_shipping:'黒出荷',garlic_drying:'乾燥設備',frozen_ingredients:'資材在庫',rice_shipping:'米穀出荷'};
+const shortNames={garlic_fridge:'冷蔵庫',black_garlic:'室管理',black_garlic_shipping:'黒出荷',garlic_drying:'乾燥設備',frozen_ingredients:'資材在庫',purchase_statements:'仕切書読込',rice_shipping:'米穀出荷'};
 const gasApps=new Set(['garlic_drying']);
 const plannedApps=new Set(['black_garlic_shipping']);
 const lastUserKey='business.lastUser.v1';
