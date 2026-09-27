@@ -25,7 +25,11 @@
   async function rpc(name,args={}) {
     const response=await authorizedFetch(baseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:{apikey:apiKey,Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify(args)});
     const data=await response.json();
-    if(!response.ok || data?.ok===false) throw new Error(data.error||data.message||'処理に失敗しました。');
+    if(!response.ok || data?.ok===false) {
+      const error=new Error(data.error||data.message||'処理に失敗しました。');
+      error.invalidSession=response.ok && name==='business_session' && data?.ok===false;
+      throw error;
+    }
     return data;
   }
   window.BusinessAuth={
@@ -40,7 +44,7 @@
     },
     users:app=>rpc('business_login_users',{p_app_id:app}),
     async login(workerId,pin,app){const data=await rpc('business_login',{p_worker_id:workerId,p_pin:pin,p_app_id:app});setToken(data.token);return rpc('business_session');},
-    async session(){if(!getToken())return null;try{return await rpc('business_session');}catch{setToken('');return null;}},
+    async session(){if(!getToken())return null;try{return await rpc('business_session');}catch(error){if(error.invalidSession)setToken('');return null;}},
     async logout(){try{await rpc('business_logout');}finally{setToken('');}},
     allows(session,app,minimum='viewer'){const levels={admin:3,operator:2,viewer:1};return (levels[session?.permissions?.[app]]||0)>=(levels[minimum]||99);}
   };
