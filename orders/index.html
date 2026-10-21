@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#246747">
+  <title>注文管理 | 株式会社エイト</title>
+  <link rel="icon" href="./icons.svg#package" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css?v=20261021-1">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><svg aria-hidden="true"><use href="./icons.svg#package"></use></svg><div><h1>注文管理</h1><span id="worker">株式会社エイト</span></div></div>
+    <div class="header-actions"><span id="sync" role="status" aria-live="polite">接続中</span><button type="button" class="icon-button" data-action="refresh" title="再読み込み" aria-label="再読み込み"><svg aria-hidden="true"><use href="./icons.svg#refresh"></use></svg></button><a class="icon-button" href="../menu.html?openExternalBrowser=1" title="業務管理メニュー" aria-label="業務管理メニュー"><svg aria-hidden="true"><use href="./icons.svg#home"></use></svg></a><button type="button" class="icon-button" data-action="logout" title="ログアウト" aria-label="ログアウト"><svg aria-hidden="true"><use href="./icons.svg#logout"></use></svg></button></div>
+  </header>
+  <nav class="main-nav" aria-label="注文管理メニュー">
+    <button type="button" data-view="input" class="active"><svg aria-hidden="true"><use href="./icons.svg#edit"></use></svg>注文入力</button>
+    <button type="button" data-view="approval"><svg aria-hidden="true"><use href="./icons.svg#approve"></use></svg>注文確定</button>
+    <button type="button" data-view="progress"><svg aria-hidden="true"><use href="./icons.svg#progress"></use></svg>進捗入力</button>
+    <button type="button" data-view="search"><svg aria-hidden="true"><use href="./icons.svg#search"></use></svg>注文検索</button>
+    <button type="button" data-view="master"><svg aria-hidden="true"><use href="./icons.svg#settings"></use></svg>マスタ</button>
+  </nav>
+  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <main id="view" aria-busy="true"><div class="empty">読み込み中...</div></main>
+  <dialog id="order-dialog" aria-labelledby="order-title"><div class="dialog-header"><div><h2 id="order-title">注文</h2><span id="order-subtitle"></span></div><div class="row"><button type="button" class="icon-button" data-action="detail-refresh" title="注文を更新" aria-label="注文を更新"><svg aria-hidden="true"><use href="./icons.svg#refresh"></use></svg></button><button type="button" class="icon-button" data-action="close-order" title="閉じる" aria-label="注文を閉じる"><svg aria-hidden="true"><use href="./icons.svg#close"></use></svg></button></div></div><div id="order-error" class="error" role="alert" hidden></div><div id="order-body"></div></dialog>
+  <dialog id="action-dialog" aria-labelledby="action-title"><div class="dialog-header"><h2 id="action-title"></h2><button type="button" class="icon-button" data-action="close-action" title="閉じる" aria-label="操作画面を閉じる"><svg aria-hidden="true"><use href="./icons.svg#close"></use></svg></button></div><div id="action-error" class="error" role="alert" hidden></div><div id="action-body"></div></dialog>
+  <script src="../shared/business-auth.js?v=20260928-session-persistence"></script>
+  <script src="../shared/business-config.js"></script>
+  <script type="module" src="./app.js?v=20261021-1"></script>
+</body>
+</html>
