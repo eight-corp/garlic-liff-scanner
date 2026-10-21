@@ -24,6 +24,18 @@ create table if not exists public.orders_carriers (
   active boolean not null default true, revision integer not null default 1,
   updated_at timestamptz not null default now(), check(length(code) between 1 and 40), check(length(name) between 1 and 160)
 );
+alter table public.orders_products
+  add column if not exists pack_size integer check(pack_size between 1 and 999999),
+  add column if not exists case_pack_size integer check(case_pack_size between 1 and 999999);
+alter table public.orders_clients
+  add column if not exists store_name text not null default '',
+  add column if not exists postal_code text not null default '',
+  add column if not exists default_carrier_id uuid references public.orders_carriers(id);
+create table if not exists public.orders_client_products (
+  client_id uuid not null references public.orders_clients(id),
+  product_id uuid not null references public.orders_products(id),
+  primary key(client_id,product_id)
+);
 create table if not exists public.orders_orders (
   id uuid primary key, order_no bigint generated always as identity unique,
   department text not null check(department in ('dry','black','processed')),
@@ -68,7 +80,7 @@ create index if not exists orders_events_order on public.orders_events(order_id,
 do $security$
 declare t text;
 begin
-  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events'] loop
+  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_client_products','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events'] loop
     execute format('alter table public.%I enable row level security',t);
     execute format('revoke all on table public.%I from public, anon, authenticated',t);
   end loop;
@@ -120,7 +132,7 @@ begin
   perform orders_private.require_user(p_worker_id);
   return jsonb_build_object('canOperate',public.business_can('black_garlic_shipping','operator'),
     'canApprove',orders_private.can_approve(),'canMaster',public.business_can('black_garlic_shipping','admin'),
-    'clients',coalesce((select jsonb_agg(to_jsonb(c) order by code) from public.orders_clients c),'[]'),
+    'clients',coalesce((select jsonb_agg(to_jsonb(c)||jsonb_build_object('product_ids',coalesce((select jsonb_agg(cp.product_id order by cp.product_id) from public.orders_client_products cp where cp.client_id=c.id),'[]')) order by c.code) from public.orders_clients c),'[]'),
     'products',coalesce((select jsonb_agg(to_jsonb(p) order by department,code) from public.orders_products p),'[]'),
     'carriers',coalesce((select jsonb_agg(to_jsonb(c) order by code) from public.orders_carriers c),'[]'),
     'version',(select count(*)::text||':'||coalesce(max(event_no),0)::text from public.orders_events));
@@ -195,7 +207,7 @@ begin
   if v_new then
     insert into public.orders_orders(id,department,client_id,client_name,delivery_name,delivery_address,delivery_phone,
       ordered_on,requested_ship_date,client_reference,notes,status,created_by)
-    values(p_order_id,p_header->>'department',c.id,c.name,btrim(p_header->>'delivery_name'),coalesce(p_header->>'delivery_address',''),
+    values(p_order_id,p_header->>'department',c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),btrim(p_header->>'delivery_name'),coalesce(p_header->>'delivery_address',''),
       coalesce(p_header->>'delivery_phone',''),(p_header->>'ordered_on')::date,(p_header->>'requested_ship_date')::date,
       coalesce(p_header->>'client_reference',''),coalesce(p_header->>'notes',''),'draft',p_worker_id);
   end if;
@@ -217,7 +229,7 @@ begin
     insert into public.orders_items(id,order_id,product_id,product_code,product_name,specification,unit,quantity,position,updated_by)
       values((x->>'id')::uuid,p_order_id,p.id,p.code,p.name,p.specification,p.unit,(x->>'quantity')::numeric,n,p_worker_id);
   end loop;
-  update public.orders_orders set department=p_header->>'department',client_id=c.id,client_name=c.name,
+  update public.orders_orders set department=p_header->>'department',client_id=c.id,client_name=concat_ws(' ',c.name,nullif(c.store_name,'')),
     delivery_name=btrim(p_header->>'delivery_name'),delivery_address=coalesce(p_header->>'delivery_address',''),delivery_phone=coalesce(p_header->>'delivery_phone',''),
     ordered_on=(p_header->>'ordered_on')::date,requested_ship_date=(p_header->>'requested_ship_date')::date,
     client_reference=coalesce(p_header->>'client_reference',''),notes=coalesce(p_header->>'notes',''),
@@ -304,32 +316,63 @@ end; $$;
 
 create or replace function public.orders_save_master(p_worker_id text,p_kind text,p_id uuid,p_revision integer,p_data jsonb)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
-declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revision integer; v_code text:=btrim(p_data->>'code'); v_name text:=btrim(p_data->>'name'); r public.orders_products;
+declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revision integer;
+  v_code text:=btrim(p_data->>'code'); v_name text:=btrim(p_data->>'name');
+  r public.orders_products; c public.orders_clients; v_unit text; v_pack integer; v_case integer;
+  v_carrier uuid; v_products uuid[]; v_postal text; v_text text;
 begin
   perform orders_private.require_user(p_worker_id,'admin');
   if p_kind is null or p_kind not in ('clients','products','carriers') then raise exception 'マスタが不正です。'; end if;
-  if v_code is null or length(v_code) not between 1 and 40 or v_name is null or length(v_name) not between 1 and 160 then raise exception 'コード・名称を入力してください。'; end if;
+  if v_code is null or length(v_code) not between 1 and 40 or v_name is null or length(v_name) not between 1 and 160 then
+    if p_kind='products' then raise exception 'JANコード・商品名を入力してください。'; else raise exception 'コード・名称を入力してください。'; end if;
+  end if;
   execute format('select revision from public.%I where id=$1 for update','orders_'||p_kind) into v_revision using v_id;
   v_exists:=v_revision is not null;
   if (v_exists and v_revision is distinct from p_revision) or (not v_exists and coalesce(p_revision,0)<>0) then raise exception 'マスタが更新されています。開き直してください。' using errcode='40001'; end if;
   if p_kind='products' then
-    if coalesce(p_data->>'department','') not in ('dry','black','processed') or nullif(btrim(p_data->>'unit'),'') is null then raise exception '部署・単位を入力してください。'; end if;
     select * into r from public.orders_products where id=v_id;
-    if v_exists and (r.department<>p_data->>'department' or r.unit<>btrim(p_data->>'unit')) and exists(select 1 from public.orders_items where product_id=v_id) then raise exception '注文で使用済みの商品の部署・単位は変更できません。別の商品コードで登録してください。'; end if;
-    insert into public.orders_products(id,code,name,specification,department,unit,active)
-      values(v_id,v_code,v_name,left(coalesce(p_data->>'specification',''),200),p_data->>'department',btrim(p_data->>'unit'),coalesce((p_data->>'active')::boolean,true))
-      on conflict(id) do update set code=excluded.code,name=excluded.name,specification=excluded.specification,department=excluded.department,unit=excluded.unit,active=excluded.active,revision=orders_products.revision+1,updated_at=now();
+    v_unit:=case when p_data?'unit' then nullif(btrim(p_data->>'unit'),'') else coalesce(r.unit,'個') end;
+    if coalesce(p_data->>'department','') not in ('dry','black','processed') or v_unit is null then raise exception 'カテゴリを選択してください。'; end if;
+    v_text:=nullif(btrim(p_data->>'pack_size'),'');
+    if v_text is not null and v_text!~'^[0-9]{1,6}$' then raise exception '入数は1～999999の整数で入力してください。'; end if;
+    v_pack:=case when p_data?'pack_size' then v_text::integer else r.pack_size end;
+    v_text:=nullif(btrim(p_data->>'case_pack_size'),'');
+    if v_text is not null and v_text!~'^[0-9]{1,6}$' then raise exception '大箱入数は1～999999の整数で入力してください。'; end if;
+    v_case:=case when p_data?'case_pack_size' then v_text::integer else r.case_pack_size end;
+    if v_pack<=0 or v_case<=0 then raise exception '入数・大箱入数は1以上の整数で入力してください。'; end if;
+    if v_exists and (r.department<>p_data->>'department' or r.unit<>v_unit) and exists(select 1 from public.orders_items where product_id=v_id) then raise exception '注文で使用済みの商品のカテゴリ・数量単位は変更できません。別のJANコードで登録してください。'; end if;
+    insert into public.orders_products(id,code,name,specification,department,unit,pack_size,case_pack_size,active)
+      values(v_id,v_code,v_name,left(coalesce(p_data->>'specification',''),200),p_data->>'department',v_unit,v_pack,v_case,coalesce((p_data->>'active')::boolean,true))
+      on conflict(id) do update set code=excluded.code,name=excluded.name,specification=excluded.specification,department=excluded.department,unit=excluded.unit,
+        pack_size=excluded.pack_size,case_pack_size=excluded.case_pack_size,active=excluded.active,revision=orders_products.revision+1,updated_at=now();
   elsif p_kind='clients' then
-    insert into public.orders_clients(id,code,name,contact_name,phone,address,active)
-      values(v_id,v_code,v_name,left(coalesce(p_data->>'contact_name',''),100),left(coalesce(p_data->>'phone',''),60),left(coalesce(p_data->>'address',''),500),coalesce((p_data->>'active')::boolean,true))
-      on conflict(id) do update set code=excluded.code,name=excluded.name,contact_name=excluded.contact_name,phone=excluded.phone,address=excluded.address,active=excluded.active,revision=orders_clients.revision+1,updated_at=now();
+    select * into c from public.orders_clients where id=v_id;
+    v_carrier:=case when p_data?'default_carrier_id' then nullif(p_data->>'default_carrier_id','')::uuid else c.default_carrier_id end;
+    if v_carrier is not null and not exists(select 1 from public.orders_carriers where id=v_carrier and (active or id=c.default_carrier_id)) then raise exception '基本の配送業者を選択し直してください。'; end if;
+    v_postal:=case when p_data?'postal_code' then btrim(coalesce(p_data->>'postal_code','')) else coalesce(c.postal_code,'') end;
+    v_postal:=translate(v_postal,'０１２３４５６７８９－','0123456789-');
+    if v_postal<>'' and v_postal!~'^[0-9]{3}-?[0-9]{4}$' then raise exception '郵便番号は7桁の数字で入力してください。'; end if;
+    if length(v_postal)=7 then v_postal:=left(v_postal,3)||'-'||right(v_postal,4); end if;
+    if p_data?'product_ids' then
+      if jsonb_typeof(p_data->'product_ids') is distinct from 'array' then raise exception '取扱商品を選択してください。'; end if;
+      select coalesce(array_agg(distinct value::uuid),'{}'::uuid[]) into v_products from jsonb_array_elements_text(p_data->'product_ids');
+      if exists(select 1 from unnest(v_products) x(id) left join public.orders_products p on p.id=x.id
+        where p.id is null or (not p.active and not exists(select 1 from public.orders_client_products cp where cp.client_id=v_id and cp.product_id=p.id))) then raise exception '取扱商品に利用できない商品があります。'; end if;
+    end if;
+    insert into public.orders_clients(id,code,name,store_name,contact_name,phone,postal_code,address,default_carrier_id,active)
+      values(v_id,v_code,v_name,left(coalesce(p_data->>'store_name',c.store_name,''),160),left(coalesce(p_data->>'contact_name',''),100),left(coalesce(p_data->>'phone',''),60),v_postal,left(coalesce(p_data->>'address',''),500),v_carrier,coalesce((p_data->>'active')::boolean,true))
+      on conflict(id) do update set code=excluded.code,name=excluded.name,store_name=excluded.store_name,contact_name=excluded.contact_name,phone=excluded.phone,postal_code=excluded.postal_code,address=excluded.address,default_carrier_id=excluded.default_carrier_id,active=excluded.active,revision=orders_clients.revision+1,updated_at=now();
+    if p_data?'product_ids' then
+      delete from public.orders_client_products where client_id=v_id and not (product_id=any(v_products));
+      insert into public.orders_client_products(client_id,product_id) select v_id,x from unnest(v_products) x on conflict do nothing;
+    end if;
   else
     insert into public.orders_carriers(id,code,name,active) values(v_id,v_code,v_name,coalesce((p_data->>'active')::boolean,true))
       on conflict(id) do update set code=excluded.code,name=excluded.name,active=excluded.active,revision=orders_carriers.revision+1,updated_at=now();
   end if;
   perform orders_private.event(null,p_worker_id,'master',jsonb_build_object('kind',p_kind,'id',v_id));
   return public.orders_bootstrap(p_worker_id);
-exception when unique_violation then raise exception '同じコードが登録されています。';
+exception when unique_violation then raise exception '同じコード（商品はJANコード）が登録されています。';
 end; $$;
 
 revoke all on all functions in schema orders_private from public,anon,authenticated;

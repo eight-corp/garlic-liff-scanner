@@ -5,11 +5,13 @@ import {chromium} from 'playwright';
 import {database,seed} from './database.mjs';
 
 const root=path.resolve('..');
+const artifacts=process.env.QA_ARTIFACTS||process.argv[2];
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try {
   for(const width of [1440,820,390,320]){
     const {db,rpc}=await database();
     const s=await seed(rpc),errors=[],contexts=[];
+    await rpc('admin','orders_save_master',{p_kind:'clients',p_id:s.client.id,p_revision:s.client.revision,p_data:{...s.client,default_carrier_id:s.carrier.id}});
     async function pageFor(actor){
       const role=actor==='admin'?'admin':actor==='viewer'?'viewer':'operator';
       const context=await browser.newContext({viewport:{width,height:900},timezoneId:'Asia/Tokyo',serviceWorkers:'block'});contexts.push(context);
@@ -72,6 +74,7 @@ try {
       await order.getByRole('button',{name:'出荷を登録',exact:true}).click();
       let ship=sales.locator('#action-dialog');
       await ship.getByLabel('乾燥にんにくの出荷数量',{exact:true}).fill('4');
+      assert.equal(await ship.getByLabel('配送業者',{exact:true}).inputValue(),s.carrier.id);
       await ship.getByLabel('配送業者',{exact:true}).selectOption(s.carrier.id);
       await ship.getByLabel('伝票番号',{exact:true}).fill('TEST-001');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
@@ -80,7 +83,7 @@ try {
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'6 袋');
       await office.getByText('他の担当者が更新しました',{exact:true}).waitFor({timeout:12000});
       assert.equal(await officeOrder.getByLabel('乾燥にんにくの作業メモ',{exact:true}).inputValue(),'未保存の現場メモ');
-      if(process.env.QA_ARTIFACTS)await sales.screenshot({path:path.join(process.env.QA_ARTIFACTS,`orders-partial-${width}.png`)});
+      if(artifacts)await sales.screenshot({path:path.join(artifacts,`orders-partial-${width}.png`)});
       await order.getByRole('button',{name:'出荷を登録',exact:true}).click();
       assert.equal(await ship.getByLabel('乾燥にんにくの出荷数量',{exact:true}).inputValue(),'6');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
@@ -100,12 +103,41 @@ try {
       await admin.getByRole('button',{name:'マスタ',exact:true}).click();
       await admin.getByRole('button',{name:'追加',exact:true}).click();
       const master=admin.locator('#action-dialog');
-      await master.getByLabel('コード',{exact:true}).fill('P003');await master.getByLabel('名称',{exact:true}).fill('にんにくペースト');
-      await master.getByLabel('部署',{exact:true}).selectOption('processed');await master.getByLabel('単位',{exact:true}).fill('袋');
+      await master.getByLabel('JANコード',{exact:true}).fill('0490123456789');await master.getByLabel('商品名',{exact:true}).fill('にんにくペースト');
+      await master.getByLabel('カテゴリ',{exact:true}).selectOption('processed');await master.getByLabel('入数',{exact:true}).fill('12');await master.getByLabel('大箱入数',{exact:true}).fill('4');
       await master.getByRole('button',{name:'保存',exact:true}).click();
       await admin.locator('.master-table').getByText('にんにくペースト',{exact:true}).waitFor();
+      assert.deepEqual(await admin.locator('.master-table thead th').allTextContents(),['JANコード','カテゴリ','商品名','規格','入数','大箱入数','有効','操作']);
+      const productRow=admin.locator('.master-table tbody tr').filter({hasText:'にんにくペースト'});
+      assert.equal(await productRow.locator('td').nth(0).innerText(),'0490123456789');
+      assert.equal(await productRow.locator('td').nth(4).innerText(),'12');
+      assert.equal(await productRow.locator('td').nth(5).innerText(),'4');
+      await admin.getByRole('button',{name:'取引先一覧',exact:true}).click();
+      await admin.getByRole('button',{name:'テスト取引先を編集',exact:true}).click();
+      await master.getByLabel('店舗名',{exact:true}).fill('本店');
+      await master.getByLabel('郵便番号',{exact:true}).fill('0123456');
+      await master.getByLabel('基本の配送業者',{exact:true}).selectOption(s.carrier.id);
+      await master.getByRole('checkbox',{name:'乾燥にんにく（P001）',exact:true}).check();
+      await master.getByRole('checkbox',{name:'黒にんにく（P002）',exact:true}).check();
+      await master.getByRole('searchbox',{name:'取扱商品を検索',exact:true}).fill('黒にんにく');
+      assert.equal(await master.getByRole('checkbox',{name:'乾燥にんにく（P001）',exact:true}).isVisible(),false);
+      if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-client-edit-${width}.png`)});
+      await master.getByRole('button',{name:'保存',exact:true}).click();
+      await admin.locator('.master-table').getByText('本店',{exact:true}).waitFor();
+      assert.deepEqual(await admin.locator('.master-table thead th').allTextContents(),['コード','名称','店舗名','担当者','電話番号','郵便番号','住所','取扱商品','基本の配送業者','有効','操作']);
+      const clientRow=admin.locator('.master-table tbody tr').filter({hasText:'本店'});
+      assert.equal(await clientRow.locator('td').nth(5).innerText(),'012-3456');
+      assert.match(await clientRow.locator('td').nth(7).innerText(),/乾燥にんにく/);
+      assert.match(await clientRow.locator('td').nth(7).innerText(),/黒にんにく/);
+      await admin.getByRole('button',{name:'テスト取引先 本店を編集',exact:true}).click();
+      assert.equal(await master.getByRole('checkbox',{name:'乾燥にんにく（P001）',exact:true}).isChecked(),true);
+      assert.equal(await master.getByRole('checkbox',{name:'黒にんにく（P002）',exact:true}).isChecked(),true);
+      await master.getByRole('checkbox',{name:'黒にんにく（P002）',exact:true}).uncheck();
+      await master.getByRole('button',{name:'保存',exact:true}).click();
+      await master.waitFor({state:'hidden'});
+      assert.doesNotMatch(await clientRow.locator('td').nth(7).innerText(),/黒にんにく/);
       assert.equal((await rpc('admin','orders_bootstrap')).canApprove,false,'Master admin does not inherit approval');
-      if(process.env.QA_ARTIFACTS)await admin.screenshot({path:path.join(process.env.QA_ARTIFACTS,`orders-master-${width}.png`)});
+      if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-master-${width}.png`)});
       for(const page of [sales,admin])assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Only tables, not the whole page, scroll horizontally');
       assert.deepEqual(errors,[]);
       console.log(`PASS ${width}px: create, common permissions, approval, live peer updates, progress, partial shipments, search, viewer safety and product master`);
