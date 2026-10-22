@@ -59,10 +59,14 @@ try {
       sales.once('dialog',dialog=>dialog.accept());
       await entry.getByRole('button',{name:'クリア',exact:true}).click();
       assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'');
-      await entry.locator('[name="department"]').selectOption('dry');
+      await entry.getByLabel('カテゴリ',{exact:true}).selectOption('dry');
       await entry.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
       await entry.getByLabel('商品',{exact:true}).selectOption(s.product.id);
       assert.equal(await entry.getByLabel('商品',{exact:true}).locator('option').filter({hasText:'黒にんにく'}).count(),0);
+      sales.once('dialog',async dialog=>{assert.equal(dialog.message(),'カテゴリを変更し、商品明細をリセットしますか？');await dialog.dismiss();});
+      await entry.getByLabel('カテゴリ',{exact:true}).selectOption('black');
+      assert.equal(await entry.getByLabel('カテゴリ',{exact:true}).inputValue(),'dry');
+      assert.equal(await entry.getByLabel('商品',{exact:true}).inputValue(),s.product.id);
       await entry.getByLabel('注文数量',{exact:true}).fill('10');
       await entry.getByLabel('備考',{exact:true}).fill('<img src=x onerror=alert(1)>');
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
@@ -84,6 +88,8 @@ try {
       assert.equal((await rpc('sales','orders_list')).total,0);
       await entry.getByRole('button',{name:'承認を依頼',exact:true}).click();
       await order.getByRole('status').filter({hasText:'承認を依頼しました。'}).waitFor();
+      assert.equal(await order.locator('dt').filter({hasText:'カテゴリ'}).count(),1);
+      assert.doesNotMatch(await order.innerText(),/部署/);
       assert.equal(await order.getByRole('button',{name:'注文を確定',exact:true}).count(),0);
       assert.equal(await order.locator('img').count(),0,'Customer text is never interpreted as markup');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
@@ -91,6 +97,7 @@ try {
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
       const office=await pageFor('office');
       await office.getByRole('button',{name:'注文確定',exact:true}).click();
+      await assertCategoryList(office);
       await office.getByRole('button',{name:'J-000001を開く',exact:true}).click();
       const officeOrder=office.locator('#order-dialog');
       await officeOrder.getByRole('button',{name:'注文を確定',exact:true}).click();
@@ -98,6 +105,7 @@ try {
       await officeOrder.getByRole('status').filter({hasText:'注文の状態を更新しました。'}).waitFor();
       await sales.waitForFunction(()=>document.querySelector('.list-table tbody .badge')?.textContent==='未着手',{},{timeout:12000});
       await sales.getByRole('button',{name:'進捗入力',exact:true}).click();
+      await assertCategoryList(sales);
       await sales.getByRole('button',{name:'J-000001を開く',exact:true}).click();
       await order.getByLabel('乾燥にんにくの進捗',{exact:true}).selectOption('ready');
       await order.getByLabel('乾燥にんにくの作業メモ',{exact:true}).fill('梱包完了');
@@ -125,6 +133,11 @@ try {
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'0 袋');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
+      await assertCategoryList(sales);
+      await sales.locator('#filter-form').getByLabel('カテゴリ',{exact:true}).selectOption('black');
+      await sales.locator('#filter-form').getByRole('button',{name:'検索',exact:true}).click();
+      await sales.locator('.empty').filter({hasText:'該当する注文はありません'}).waitFor();
+      await sales.locator('#filter-form').getByLabel('カテゴリ',{exact:true}).selectOption('dry');
       await sales.locator('#filter-form').getByLabel('検索',{exact:true}).fill('テスト取引先');
       await sales.locator('#filter-form').getByRole('button',{name:'検索',exact:true}).click();
       await sales.getByRole('button',{name:'J-000001を開く',exact:true}).waitFor();
@@ -177,6 +190,7 @@ try {
       await entry.getByRole('button',{name:'下書き保存',exact:true}).click();
       await order.getByRole('status').filter({hasText:'下書きを保存しました。'}).waitFor();
       await order.getByRole('button',{name:'注文を変更',exact:true}).click();
+      assert.equal(await order.getByLabel('カテゴリ',{exact:true}).inputValue(),'dry');
       await order.getByLabel('注文数量',{exact:true}).fill('2');
       await order.getByRole('button',{name:'下書き保存',exact:true}).click();
       await order.getByRole('status').filter({hasText:'下書きを保存しました。'}).waitFor();
@@ -192,3 +206,11 @@ try {
     }catch(error){console.error('Page errors:',errors);for(const c of contexts)for(const page of c.pages())console.error((await page.locator('body').innerText()).slice(-6000));throw error;}finally {for(const c of contexts)await c.close();await db.close();}
   }
 }finally {await browser.close();}
+
+async function assertCategoryList(page){
+  const filter=page.locator('#filter-form');
+  await filter.getByLabel('カテゴリ',{exact:true}).waitFor();
+  assert.equal(await filter.getByLabel('カテゴリ',{exact:true}).locator('option').first().innerText(),'全カテゴリ');
+  assert.equal(await page.locator('.list-table thead th').nth(1).innerText(),'カテゴリ');
+  assert.doesNotMatch(await page.locator('#view').innerText(),/部署/);
+}
