@@ -31,15 +31,16 @@ export async function database() {
 
 export async function seed(rpc) {
   const master=async(kind,data)=>rpc('admin','orders_save_master',{p_kind:kind,p_id:null,p_revision:0,p_data:data})
-  let data=await master('clients',{code:'C001',name:'テスト取引先',address:'青森県',phone:'000-0000',contact_name:'担当'})
+  const delivery={id:crypto.randomUUID(),name:'テスト納品先',postal_code:'',address:'青森県',phone:'000-0000',active:true}
+  let data=await master('clients',{code:'C001',name:'テスト取引先',address:'青森県',phone:'000-0000',contact_name:'担当',deliveries:[delivery]})
   const client=data.clients[0]
   data=await master('products',{code:'P001',name:'乾燥にんにく',department:'dry',specification:'1kg',unit:'袋'})
   const product=data.products[0]
   data=await master('products',{code:'P002',name:'黒にんにく',department:'black',specification:'200g',unit:'箱'})
   const black=data.products.find(p=>p.department==='black')
   data=await master('carriers',{code:'D001',name:'テスト配送'})
-  const header={department:'dry',client_id:client.id,delivery_name:'テスト納品先',delivery_address:'青森県',ordered_on:'2026-10-21',requested_ship_date:'2026-10-25',notes:'<script>no</script>'}
+  const header={department:'dry',client_id:client.id,delivery_id:delivery.id,delivery_name:delivery.name,delivery_address:delivery.address,delivery_phone:delivery.phone,ordered_on:'2026-10-21',requested_ship_date:'2026-10-25',notes:'<script>no</script>'}
   const orderId=crypto.randomUUID(),itemId=crypto.randomUUID()
   const items=[{id:itemId,product_id:product.id,quantity:10}]
-  return {client,product,black,carrier:data.carriers[0],header,orderId,itemId,items}
+  return {client,delivery,product,black,carrier:data.carriers[0],header,orderId,itemId,items}
 }

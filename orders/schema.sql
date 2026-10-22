@@ -36,6 +36,13 @@ create table if not exists public.orders_client_products (
   product_id uuid not null references public.orders_products(id),
   primary key(client_id,product_id)
 );
+create table if not exists public.orders_client_deliveries (
+  id uuid primary key, client_id uuid not null references public.orders_clients(id),
+  name text not null check(length(name) between 1 and 160),
+  postal_code text not null default '', address text not null default '' check(length(address)<=500),
+  phone text not null default '' check(length(phone)<=60), active boolean not null default true,
+  position integer not null, updated_at timestamptz not null default now()
+);
 create table if not exists public.orders_orders (
   id uuid primary key, order_no bigint generated always as identity unique,
   department text not null check(department in ('dry','black','processed')),
@@ -55,6 +62,7 @@ create table if not exists public.orders_items (
   position integer not null, work_status text not null default 'unstarted' check(work_status in ('unstarted','working','ready')),
   work_note text not null default '', updated_by text references public.workers(worker_id), updated_at timestamptz not null default now()
 );
+alter table public.orders_orders add column if not exists delivery_id uuid references public.orders_client_deliveries(id);
 create table if not exists public.orders_shipments (
   id uuid primary key, order_id uuid not null references public.orders_orders(id), shipped_on date not null,
   carrier_id uuid references public.orders_carriers(id), carrier_name text not null default '', tracking_no text not null default '',
@@ -76,11 +84,12 @@ create index if not exists orders_items_order on public.orders_items(order_id,po
 create index if not exists orders_shipments_order on public.orders_shipments(order_id);
 create index if not exists orders_shipment_item on public.orders_shipment_items(item_id);
 create index if not exists orders_events_order on public.orders_events(order_id,event_no);
+create index if not exists orders_client_deliveries_client on public.orders_client_deliveries(client_id,position);
 
 do $security$
 declare t text;
 begin
-  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_client_products','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events'] loop
+  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events'] loop
     execute format('alter table public.%I enable row level security',t);
     execute format('revoke all on table public.%I from public, anon, authenticated',t);
   end loop;
@@ -115,7 +124,10 @@ select i.*,coalesce((select sum(si.quantity) from public.orders_shipment_items s
   join public.orders_shipments s on s.id=si.shipment_id where si.item_id=i.id and s.voided_at is null),0) shipped_quantity
 from public.orders_items i;
 create or replace view orders_private.order_summary as
-select o.*,coalesce(w.worker_name,o.created_by) creator_name,
+select o.id,o.order_no,o.department,o.client_id,o.client_name,o.delivery_name,o.delivery_address,o.delivery_phone,
+  o.ordered_on,o.requested_ship_date,o.client_reference,o.notes,o.status,o.created_by,o.submitted_at,
+  o.approved_by,o.approved_at,o.return_reason,o.revision,o.created_at,o.updated_at,
+  coalesce(w.worker_name,o.created_by) creator_name,
   (select count(*) from public.orders_items i where i.order_id=o.id) item_count,
   (select count(*) from orders_private.item_summary i where i.order_id=o.id and i.shipped_quantity>=i.quantity) shipped_item_count,
   case when o.status<>'confirmed' then o.status
@@ -123,7 +135,7 @@ select o.*,coalesce(w.worker_name,o.created_by) creator_name,
     when exists(select 1 from orders_private.item_summary i where i.order_id=o.id and i.shipped_quantity>0) then 'partial'
     when not exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'ready') then 'ready'
     when exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'unstarted') then 'working'
-    else 'confirmed' end progress
+    else 'confirmed' end progress,o.delivery_id
 from public.orders_orders o left join public.workers w on w.worker_id=o.created_by;
 
 create or replace function public.orders_bootstrap(p_worker_id text)
@@ -132,7 +144,9 @@ begin
   perform orders_private.require_user(p_worker_id);
   return jsonb_build_object('canOperate',public.business_can('black_garlic_shipping','operator'),
     'canApprove',orders_private.can_approve(),'canMaster',public.business_can('black_garlic_shipping','admin'),
-    'clients',coalesce((select jsonb_agg(to_jsonb(c)||jsonb_build_object('product_ids',coalesce((select jsonb_agg(cp.product_id order by cp.product_id) from public.orders_client_products cp where cp.client_id=c.id),'[]')) order by c.code) from public.orders_clients c),'[]'),
+    'clients',coalesce((select jsonb_agg(to_jsonb(c)||jsonb_build_object(
+      'product_ids',coalesce((select jsonb_agg(cp.product_id order by cp.product_id) from public.orders_client_products cp where cp.client_id=c.id),'[]'),
+      'deliveries',coalesce((select jsonb_agg(to_jsonb(d) order by d.position,d.id) from public.orders_client_deliveries d where d.client_id=c.id),'[]')) order by c.code) from public.orders_clients c),'[]'),
     'products',coalesce((select jsonb_agg(to_jsonb(p) order by department,code) from public.orders_products p),'[]'),
     'carriers',coalesce((select jsonb_agg(to_jsonb(c) order by code) from public.orders_carriers c),'[]'),
     'version',(select count(*)::text||':'||coalesce(max(event_no),0)::text from public.orders_events));
@@ -183,7 +197,9 @@ end; $$;
 
 create or replace function public.orders_save(p_worker_id text,p_order_id uuid,p_revision integer,p_header jsonb,p_items jsonb,p_submit boolean default false)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
-declare r public.orders_orders; c public.orders_clients; p public.orders_products; x jsonb; n integer:=0; q numeric; v_id uuid; v_new boolean; v_before jsonb;
+declare r public.orders_orders; c public.orders_clients; p public.orders_products; d public.orders_client_deliveries;
+  x jsonb; n integer:=0; q numeric; v_id uuid; v_new boolean; v_before jsonb;
+  v_delivery_id uuid; v_delivery_name text; v_delivery_address text; v_delivery_phone text;
 begin
   perform orders_private.require_user(p_worker_id,'operator');
   if p_order_id is null or p_submit is null or p_header is null or jsonb_typeof(p_header)<>'object'
@@ -199,17 +215,27 @@ begin
     if r.created_by<>p_worker_id and not public.business_can('black_garlic_shipping','admin') then raise exception '登録担当者以外は変更できません。' using errcode='42501'; end if;
     v_before:=jsonb_build_object('header',to_jsonb(r),'items',coalesce((select jsonb_agg(to_jsonb(i) order by position) from public.orders_items i where order_id=p_order_id),'[]'));
   end if;
-  if coalesce(p_header->>'department','') not in ('dry','black','processed') then raise exception '部署を選択してください。'; end if;
-  select * into c from public.orders_clients where id=(p_header->>'client_id')::uuid;
+  if coalesce(p_header->>'department','') not in ('dry','black','processed') then raise exception 'カテゴリを選択してください。'; end if;
+  select * into c from public.orders_clients where id=(p_header->>'client_id')::uuid for share;
   if not found or (not c.active and c.id is distinct from r.client_id) then raise exception '取引先を選択してください。'; end if;
-  if nullif(btrim(p_header->>'delivery_name'),'') is null then raise exception '納品先を入力してください。'; end if;
+  v_delivery_id:=nullif(p_header->>'delivery_id','')::uuid;
+  -- Keep the saved destination snapshot unless a different destination or refreshed details are selected.
+  if not v_new and c.id=r.client_id and v_delivery_id is not distinct from r.delivery_id
+    and p_header->>'delivery_name'=r.delivery_name and p_header->>'delivery_address'=r.delivery_address
+    and p_header->>'delivery_phone'=r.delivery_phone then
+    v_delivery_name:=r.delivery_name; v_delivery_address:=r.delivery_address; v_delivery_phone:=r.delivery_phone;
+  else
+    select * into d from public.orders_client_deliveries where id=v_delivery_id and client_id=c.id and active for share;
+    if not found then raise exception '取引先に登録された納品先を選択してください。'; end if;
+    v_delivery_name:=d.name; v_delivery_address:=concat_ws(' ',nullif(d.postal_code,''),nullif(d.address,'')); v_delivery_phone:=d.phone;
+  end if;
   if nullif(p_header->>'ordered_on','') is null or nullif(p_header->>'requested_ship_date','') is null then raise exception '注文日・出荷希望日を入力してください。'; end if;
   if v_new then
-    insert into public.orders_orders(id,department,client_id,client_name,delivery_name,delivery_address,delivery_phone,
+    insert into public.orders_orders(id,department,client_id,client_name,delivery_id,delivery_name,delivery_address,delivery_phone,
       ordered_on,requested_ship_date,client_reference,notes,status,created_by)
-    values(p_order_id,p_header->>'department',c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),btrim(p_header->>'delivery_name'),coalesce(p_header->>'delivery_address',''),
-      coalesce(p_header->>'delivery_phone',''),(p_header->>'ordered_on')::date,(p_header->>'requested_ship_date')::date,
-      coalesce(p_header->>'client_reference',''),coalesce(p_header->>'notes',''),'draft',p_worker_id);
+    values(p_order_id,p_header->>'department',c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),v_delivery_id,v_delivery_name,v_delivery_address,
+      v_delivery_phone,(p_header->>'ordered_on')::date,(p_header->>'requested_ship_date')::date,
+      '',coalesce(p_header->>'notes',''),'draft',p_worker_id);
   end if;
   for x in select value from jsonb_array_elements(p_items) loop
     v_id:=(x->>'id')::uuid; q:=(x->>'quantity')::numeric;
@@ -217,7 +243,7 @@ begin
     if exists(select 1 from public.orders_items where id=v_id and order_id<>p_order_id) then raise exception '明細IDが不正です。'; end if;
     select * into p from public.orders_products where id=(x->>'product_id')::uuid;
     if not found or p.department<>p_header->>'department' or (not p.active and not exists(select 1 from public.orders_items where order_id=p_order_id and id=v_id and product_id=p.id)) then
-      raise exception '選択した部署の商品を指定してください。';
+      raise exception '選択したカテゴリの商品を指定してください。';
     end if;
     n:=n+1;
   end loop;
@@ -230,9 +256,9 @@ begin
       values((x->>'id')::uuid,p_order_id,p.id,p.code,p.name,p.specification,p.unit,(x->>'quantity')::numeric,n,p_worker_id);
   end loop;
   update public.orders_orders set department=p_header->>'department',client_id=c.id,client_name=concat_ws(' ',c.name,nullif(c.store_name,'')),
-    delivery_name=btrim(p_header->>'delivery_name'),delivery_address=coalesce(p_header->>'delivery_address',''),delivery_phone=coalesce(p_header->>'delivery_phone',''),
+    delivery_id=v_delivery_id,delivery_name=v_delivery_name,delivery_address=v_delivery_address,delivery_phone=v_delivery_phone,
     ordered_on=(p_header->>'ordered_on')::date,requested_ship_date=(p_header->>'requested_ship_date')::date,
-    client_reference=coalesce(p_header->>'client_reference',''),notes=coalesce(p_header->>'notes',''),
+    notes=coalesce(p_header->>'notes',''),
     status=case when p_submit then 'pending' else 'draft' end,submitted_at=case when p_submit then now() else null end,return_reason=''
     where id=p_order_id;
   perform orders_private.event(p_order_id,p_worker_id,case when p_submit then 'submitted' when v_new then 'created' else 'saved' end,jsonb_build_object('before',v_before));
@@ -320,6 +346,7 @@ declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revisio
   v_code text:=btrim(p_data->>'code'); v_name text:=btrim(p_data->>'name');
   r public.orders_products; c public.orders_clients; v_unit text; v_pack integer; v_case integer;
   v_carrier uuid; v_products uuid[]; v_postal text; v_text text;
+  v_delivery_ids uuid[]:='{}'; v_delivery_id uuid; v_delivery jsonb; v_position integer:=0;
 begin
   perform orders_private.require_user(p_worker_id,'admin');
   if p_kind is null or p_kind not in ('clients','products','carriers') then raise exception 'マスタが不正です。'; end if;
@@ -365,6 +392,28 @@ begin
     if p_data?'product_ids' then
       delete from public.orders_client_products where client_id=v_id and not (product_id=any(v_products));
       insert into public.orders_client_products(client_id,product_id) select v_id,x from unnest(v_products) x on conflict do nothing;
+    end if;
+    if p_data?'deliveries' then
+      if jsonb_typeof(p_data->'deliveries') is distinct from 'array' then raise exception '納品先の形式が不正です。'; end if;
+      if jsonb_array_length(p_data->'deliveries')>100 then raise exception '納品先は100件までです。'; end if;
+      for v_delivery in select value from jsonb_array_elements(p_data->'deliveries') loop
+        if jsonb_typeof(v_delivery)<>'object' then raise exception '納品先の形式が不正です。'; end if;
+        v_delivery_id:=nullif(v_delivery->>'id','')::uuid;
+        if v_delivery_id is null or v_delivery_id=any(v_delivery_ids) then raise exception '納品先IDが不正です。'; end if;
+        if exists(select 1 from public.orders_client_deliveries where id=v_delivery_id and client_id<>v_id) then raise exception '別の取引先の納品先は登録できません。'; end if;
+        if nullif(btrim(v_delivery->>'name'),'') is null or length(btrim(v_delivery->>'name'))>160 then raise exception '納品先名は160文字以内で入力してください。'; end if;
+        if length(coalesce(v_delivery->>'address',''))>500 or length(coalesce(v_delivery->>'phone',''))>60 then raise exception '納品先の住所・電話番号が長すぎます。'; end if;
+        v_postal:=translate(btrim(coalesce(v_delivery->>'postal_code','')),'０１２３４５６７８９－','0123456789-');
+        if v_postal<>'' and v_postal!~'^[0-9]{3}-?[0-9]{4}$' then raise exception '納品先の郵便番号は7桁の数字で入力してください。'; end if;
+        if length(v_postal)=7 then v_postal:=left(v_postal,3)||'-'||right(v_postal,4); end if;
+        v_position:=v_position+1; v_delivery_ids:=array_append(v_delivery_ids,v_delivery_id);
+        insert into public.orders_client_deliveries(id,client_id,name,postal_code,address,phone,active,position)
+          values(v_delivery_id,v_id,btrim(v_delivery->>'name'),v_postal,btrim(coalesce(v_delivery->>'address','')),btrim(coalesce(v_delivery->>'phone','')),coalesce((v_delivery->>'active')::boolean,true),v_position)
+          on conflict(id) do update set name=excluded.name,postal_code=excluded.postal_code,address=excluded.address,phone=excluded.phone,active=excluded.active,position=excluded.position,updated_at=now()
+          where orders_client_deliveries.client_id=excluded.client_id;
+        if not found then raise exception '別の取引先の納品先は登録できません。'; end if;
+      end loop;
+      update public.orders_client_deliveries set active=false,updated_at=now() where client_id=v_id and active and not(id=any(v_delivery_ids));
     end if;
   else
     insert into public.orders_carriers(id,code,name,active) values(v_id,v_code,v_name,coalesce((p_data->>'active')::boolean,true))

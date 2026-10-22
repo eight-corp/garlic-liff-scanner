@@ -29,7 +29,7 @@ begin
     execute format('select count(*),md5(coalesce(string_agg(h, '''' order by h),'''')) from (select md5(to_jsonb(t)::text) h from (select %s from %I.%I) t%s) rows',r.column_sql,r.schema_name,r.table_name,filter_sql) into n,h;
     if n<>r.row_count or h<>r.fingerprint then raise exception 'Existing data changed: %.%',r.schema_name,r.table_name; end if;
   end loop;
-  if (select count(*) from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname in ('orders_clients','orders_products','orders_carriers','orders_client_products','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events') and c.relrowsecurity)<>9 then raise exception 'RLS check failed'; end if;
+  if (select count(*) from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname in ('orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events') and c.relrowsecurity)<>10 then raise exception 'RLS check failed'; end if;
   if exists(select 1 from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname like 'orders\\_%' escape '\\' and c.relkind='r' and (has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') or has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE'))) then raise exception 'Direct table access detected'; end if;
 end; $verify$;
 select 'Orders installed; existing business data and user permissions unchanged' result,

@@ -23,7 +23,7 @@ test('orders follow approval, progress and partial shipment rules without changi
     await t.test('department validation, owner checks and concurrent edit protection are atomic',async()=>{
       detail=await save()
       const before=await snapshot()
-      await assert.rejects(save('sales',{p_items:[{...s.items[0],product_id:s.black.id}]}),/部署/)
+      await assert.rejects(save('sales',{p_items:[{...s.items[0],product_id:s.black.id}]}),/カテゴリ/)
       await assert.rejects(save('other'),/登録担当者/)
       await assert.rejects(save('sales',{p_revision:0}),/更新/)
       await assert.rejects(save('sales',{p_items:[{...s.items[0],quantity:0}]}),/数量/)
