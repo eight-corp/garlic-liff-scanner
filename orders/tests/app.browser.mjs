@@ -11,6 +11,7 @@ try {
   for(const width of [1440,820,390,320]){
     const {db,rpc}=await database();
     const s=await seed(rpc),errors=[],contexts=[];
+    let failNextOrderSave=false;
     await rpc('admin','orders_save_master',{p_kind:'clients',p_id:s.client.id,p_revision:s.client.revision,p_data:{...s.client,default_carrier_id:s.carrier.id}});
     async function pageFor(actor){
       const role=actor==='admin'?'admin':actor==='viewer'?'viewer':'operator';
@@ -28,6 +29,7 @@ try {
         const name=new URL(route.request().url()).pathname.split('/').at(-1);
         let body;
         try {
+          if(name==='orders_save'&&actor==='sales'&&failNextOrderSave){failNextOrderSave=false;return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({message:'テスト通信エラー'})});}
           if(name==='business_session')body={ok:true,workerId:actor,workerName:actor,systemAdmin:actor==='admin',permissions:{black_garlic_shipping:role,...(actor==='office'?{order_approval:'operator'}:{})}};
           else body=await rpc(actor,name,route.request().postDataJSON());
           return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
@@ -36,25 +38,57 @@ try {
       const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
       await page.clock.setFixedTime('2026-10-21T12:00:00+09:00');
       await page.goto('https://orders.test/orders/');
-      await page.getByRole('button',{name:'注文を追加',exact:true}).waitFor({state:actor==='viewer'?'hidden':'visible'});
-      await page.getByRole('heading',{name:'注文入力',exact:true}).waitFor();
+      await page.getByRole('heading',{name:actor==='viewer'?'過去注文検索':'注文入力',exact:true}).waitFor();
+      if(actor!=='viewer')await page.locator('#entry-form').waitFor();
       return page;
     }
     try {
       const sales=await pageFor('sales');
-      await sales.getByRole('button',{name:'注文を追加',exact:true}).click();
+      assert.equal(await sales.locator('#filter-form,.list-table').count(),0,'Order input has no search or list');
+      assert.equal(await sales.getByRole('button',{name:'注文を追加',exact:true}).count(),0);
+      const entry=sales.locator('#entry-body');
       const order=sales.locator('#order-dialog');
-      await order.locator('[name="department"]').selectOption('dry');
-      await order.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
-      await order.getByLabel('商品',{exact:true}).selectOption(s.product.id);
-      assert.equal(await order.getByLabel('商品',{exact:true}).locator('option').filter({hasText:'黒にんにく'}).count(),0);
-      await order.getByLabel('注文数量',{exact:true}).fill('10');
-      await order.getByLabel('備考',{exact:true}).fill('<img src=x onerror=alert(1)>');
-      await order.getByRole('button',{name:'承認を依頼',exact:true}).click();
+      assert.equal(await entry.getByLabel('注文日',{exact:true}).inputValue(),'2026-10-21');
+      await entry.getByRole('button',{name:'下書き保存',exact:true}).click();
+      await sales.locator('#entry-error').filter({hasText:'取引先・納品先・注文日・出荷希望日を入力'}).waitFor();
+      assert.equal((await rpc('sales','orders_list')).total,0);
+      await entry.getByLabel('備考',{exact:true}).fill('クリア前の入力');
+      sales.once('dialog',dialog=>dialog.dismiss());
+      await entry.getByRole('button',{name:'クリア',exact:true}).click();
+      assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'クリア前の入力');
+      sales.once('dialog',dialog=>dialog.accept());
+      await entry.getByRole('button',{name:'クリア',exact:true}).click();
+      assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'');
+      await entry.locator('[name="department"]').selectOption('dry');
+      await entry.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
+      await entry.getByLabel('商品',{exact:true}).selectOption(s.product.id);
+      assert.equal(await entry.getByLabel('商品',{exact:true}).locator('option').filter({hasText:'黒にんにく'}).count(),0);
+      await entry.getByLabel('注文数量',{exact:true}).fill('10');
+      await entry.getByLabel('備考',{exact:true}).fill('<img src=x onerror=alert(1)>');
+      await sales.getByRole('button',{name:'注文検索',exact:true}).click();
+      await sales.getByRole('button',{name:'注文入力',exact:true}).click();
+      assert.equal(await entry.getByLabel('注文数量',{exact:true}).inputValue(),'10');
+      assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'<img src=x onerror=alert(1)>');
+      const refresh=sales.waitForResponse(response=>response.url().endsWith('/rpc/orders_bootstrap'),{timeout:12000});
+      await entry.getByLabel('備考',{exact:true}).focus();
+      await rpc('admin','orders_save_master',{p_kind:'carriers',p_id:s.carrier.id,p_revision:s.carrier.revision,p_data:s.carrier});
+      await (await refresh).finished();
+      await sales.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'<img src=x onerror=alert(1)>');
+      assert.equal(await sales.evaluate(()=>document.activeElement?.name),'notes','Live synchronization does not recreate the entry form');
+      if(artifacts)await sales.screenshot({path:path.join(artifacts,`orders-entry-${width}.png`),fullPage:true});
+      failNextOrderSave=true;
+      await entry.getByRole('button',{name:'承認を依頼',exact:true}).click();
+      await sales.locator('#entry-error').filter({hasText:'テスト通信エラー'}).waitFor();
+      assert.equal(await entry.getByLabel('注文数量',{exact:true}).inputValue(),'10');
+      assert.equal((await rpc('sales','orders_list')).total,0);
+      await entry.getByRole('button',{name:'承認を依頼',exact:true}).click();
       await order.getByRole('status').filter({hasText:'承認を依頼しました。'}).waitFor();
       assert.equal(await order.getByRole('button',{name:'注文を確定',exact:true}).count(),0);
       assert.equal(await order.locator('img').count(),0,'Customer text is never interpreted as markup');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
+      assert.equal(await entry.getByLabel('取引先',{exact:true}).inputValue(),'');
+      await sales.getByRole('button',{name:'注文検索',exact:true}).click();
       const office=await pageFor('office');
       await office.getByRole('button',{name:'注文確定',exact:true}).click();
       await office.getByRole('button',{name:'J-000001を開く',exact:true}).click();
@@ -96,6 +130,7 @@ try {
       await sales.getByRole('button',{name:'J-000001を開く',exact:true}).waitFor();
       assert.equal(await sales.locator('.list-table .badge.shipped').count(),1);
       const viewer=await pageFor('viewer');
+      assert.equal(await viewer.getByRole('button',{name:'注文入力',exact:true}).isDisabled(),true);
       await viewer.getByRole('button',{name:'注文検索',exact:true}).click();
       await viewer.getByRole('button',{name:'J-000001を開く',exact:true}).click();
       assert.equal(await viewer.locator('#order-dialog').getByRole('button',{name:'出荷を登録',exact:true}).count(),0);
@@ -136,6 +171,19 @@ try {
       await master.getByRole('button',{name:'保存',exact:true}).click();
       await master.waitFor({state:'hidden'});
       assert.doesNotMatch(await clientRow.locator('td').nth(7).innerText(),/黒にんにく/);
+      await sales.getByRole('button',{name:'注文入力',exact:true}).click();
+      await entry.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
+      await entry.getByLabel('商品',{exact:true}).selectOption(s.product.id);
+      await entry.getByRole('button',{name:'下書き保存',exact:true}).click();
+      await order.getByRole('status').filter({hasText:'下書きを保存しました。'}).waitFor();
+      await order.getByRole('button',{name:'注文を変更',exact:true}).click();
+      await order.getByLabel('注文数量',{exact:true}).fill('2');
+      await order.getByRole('button',{name:'下書き保存',exact:true}).click();
+      await order.getByRole('status').filter({hasText:'下書きを保存しました。'}).waitFor();
+      assert.equal(await order.locator('.detail-table tbody td').nth(1).innerText(),'2 袋');
+      await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
+      assert.equal(await entry.getByLabel('注文数量',{exact:true}).inputValue(),'1');
+      assert.equal(await entry.getByLabel('取引先',{exact:true}).inputValue(),'');
       assert.equal((await rpc('admin','orders_bootstrap')).canApprove,false,'Master admin does not inherit approval');
       if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-master-${width}.png`)});
       for(const page of [sales,admin])assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Only tables, not the whole page, scroll horizontally');
