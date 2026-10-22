@@ -15,12 +15,22 @@ function lastUser(){try{return localStorage.getItem(lastUserKey)||'';}catch{retu
 function rememberUser(workerId){try{localStorage.setItem(lastUserKey,workerId);}catch{}}
 async function busy(form,fn){const buttons=[...form.querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);let succeeded=false;try{status('');await fn();succeeded=true;}catch(error){status(error.message);}finally{buttons.forEach(button=>button.disabled=false);}return succeeded;}
 async function showLogin(){current=null;$('managementPanel').hidden=true;$('loginPanel').hidden=false;const users=await auth.users('management');$('loginUser').innerHTML=users.map(user=>`<option value="${esc(user.workerId)}">${esc(user.workerName)}</option>`).join('');const remembered=lastUser();if(users.some(user=>user.workerId===remembered))$('loginUser').value=remembered;}
-async function refresh(){current=await auth.session();if(!current?.systemAdmin){await showLogin();return;}data=await auth.rpc('business_admin_data');$('loginPanel').hidden=true;$('managementPanel').hidden=false;$('signedIn').textContent=current.workerName+'（全体管理者）';render();}
+async function refresh(){
+ current=await auth.session();if(!current?.systemAdmin){await showLogin();return;}
+ data=await auth.rpc('business_admin_data');
+ const approval=data.apps.find(app=>app.app_id==='order_approval');
+ if(approval){
+  data.apps=data.apps.filter(app=>app.app_id!=='order_approval');
+  const orderIndex=data.apps.findIndex(app=>app.app_id==='black_garlic_shipping');
+  data.apps.splice(orderIndex<0?data.apps.length:orderIndex+1,0,approval);
+ }
+ $('loginPanel').hidden=true;$('managementPanel').hidden=false;$('signedIn').textContent=current.workerName+'（全体管理者）';render();
+}
 
-function appHeaders(){return data.apps.map(app=>`<th>${esc(shortNames[app.app_id]||app.app_name)}<span class="app-state">${app.migrated?'切替済':plannedApps.has(app.app_id)?'準備中':gasApps.has(app.app_id)?'GAS版':'未移行'}</span></th>`).join('');}
+function appHeaders(){return data.apps.map(app=>`<th scope="col" data-app-header="${esc(app.app_id)}">${esc(shortNames[app.app_id]||app.app_name)}<span class="app-state">${app.app_id==='black_garlic_shipping'?'アクセス権':app.app_id==='order_approval'?'承認権限':app.migrated?'切替済':plannedApps.has(app.app_id)?'準備中':gasApps.has(app.app_id)?'GAS版':'未移行'}</span></th>`).join('');}
 function permissionCell(user,app,formId){
  if(app.app_id==='order_approval')return `<td class="role-cell"><input class="compact-check" type="checkbox" form="${formId}" data-app="order_approval" value="operator" aria-label="注文承認の権限" ${['operator','admin'].includes(user.permissions?.order_approval)?'checked':''}></td>`;
- return `<td class="role-cell"><select class="cell-input" form="${formId}" data-app="${esc(app.app_id)}" aria-label="${esc(app.app_name)}の権限">${roleOptions.map(([value,label])=>`<option value="${value}" ${value===(user.permissions?.[app.app_id]||'')?'selected':''}>${label}</option>`).join('')}</select></td>`;
+ return `<td class="role-cell"><select class="cell-input" form="${formId}" data-app="${esc(app.app_id)}" aria-label="${app.app_id==='black_garlic_shipping'?'注文管理のアクセス権':esc(app.app_name)+'の権限'}">${roleOptions.map(([value,label])=>`<option value="${value}" ${value===(user.permissions?.[app.app_id]||'')?'selected':''}>${label}</option>`).join('')}</select></td>`;
 }
 function userRow(user,key,isNew=false){
  const formId=`user-form-${key}`;
