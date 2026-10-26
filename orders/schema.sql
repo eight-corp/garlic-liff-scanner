@@ -26,7 +26,15 @@ create table if not exists public.orders_carriers (
 );
 alter table public.orders_products
   add column if not exists pack_size integer check(pack_size between 1 and 999999),
-  add column if not exists case_pack_size integer check(case_pack_size between 1 and 999999);
+  add column if not exists case_pack_size integer check(case_pack_size between 1 and 999999),
+  add column if not exists band_box_count integer check(band_box_count between 1 and 999999),
+  add column if not exists notes text not null default '' check(length(notes)<=2000);
+-- Empty JAN codes are allowed on multiple products; nonempty codes remain unique.
+alter table public.orders_products
+  drop constraint if exists orders_products_code_key,
+  drop constraint if exists orders_products_code_check;
+alter table public.orders_products add constraint orders_products_code_check check(length(code)<=40);
+create unique index if not exists orders_products_nonempty_code_unique on public.orders_products(code) where code<>'';
 alter table public.orders_clients
   add column if not exists store_name text not null default '',
   add column if not exists postal_code text not null default '',
@@ -344,14 +352,18 @@ create or replace function public.orders_save_master(p_worker_id text,p_kind tex
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revision integer;
   v_code text:=btrim(p_data->>'code'); v_name text:=btrim(p_data->>'name');
-  r public.orders_products; c public.orders_clients; v_unit text; v_pack integer; v_case integer;
+  r public.orders_products; c public.orders_clients; v_unit text; v_pack integer; v_case integer; v_band integer; v_notes text;
   v_carrier uuid; v_products uuid[]; v_postal text; v_text text;
   v_delivery_ids uuid[]:='{}'; v_delivery_id uuid; v_delivery jsonb; v_position integer:=0;
 begin
   perform orders_private.require_user(p_worker_id,'admin');
   if p_kind is null or p_kind not in ('clients','products','carriers') then raise exception 'マスタが不正です。'; end if;
-  if v_code is null or length(v_code) not between 1 and 40 or v_name is null or length(v_name) not between 1 and 160 then
-    if p_kind='products' then raise exception 'JANコード・商品名を入力してください。'; else raise exception 'コード・名称を入力してください。'; end if;
+  if p_kind='products' then
+    v_code:=coalesce(v_code,'');
+    if length(v_code)>40 then raise exception 'JANコードは40文字以内で入力してください。'; end if;
+    if v_name is null or length(v_name) not between 1 and 160 then raise exception '商品名を入力してください。'; end if;
+  elsif v_code is null or length(v_code) not between 1 and 40 or v_name is null or length(v_name) not between 1 and 160 then
+    raise exception 'コード・名称を入力してください。';
   end if;
   execute format('select revision from public.%I where id=$1 for update','orders_'||p_kind) into v_revision using v_id;
   v_exists:=v_revision is not null;
@@ -366,12 +378,18 @@ begin
     v_text:=nullif(btrim(p_data->>'case_pack_size'),'');
     if v_text is not null and v_text!~'^[0-9]{1,6}$' then raise exception '大箱入数は1～999999の整数で入力してください。'; end if;
     v_case:=case when p_data?'case_pack_size' then v_text::integer else r.case_pack_size end;
+    v_text:=nullif(btrim(p_data->>'band_box_count'),'');
+    if v_text is not null and v_text!~'^[0-9]{1,6}$' then raise exception 'バンドは1～999999の整数で入力してください。'; end if;
+    v_band:=case when p_data?'band_box_count' then v_text::integer else r.band_box_count end;
+    if v_band<=0 then raise exception 'バンドは1以上の整数で入力してください。'; end if;
+    v_notes:=coalesce(p_data->>'notes',r.notes,'');
+    if length(v_notes)>2000 then raise exception '備考は2000文字以内で入力してください。'; end if;
     if v_pack<=0 or v_case<=0 then raise exception '入数・大箱入数は1以上の整数で入力してください。'; end if;
-    if v_exists and (r.department<>p_data->>'department' or r.unit<>v_unit) and exists(select 1 from public.orders_items where product_id=v_id) then raise exception '注文で使用済みの商品のカテゴリ・数量単位は変更できません。別のJANコードで登録してください。'; end if;
-    insert into public.orders_products(id,code,name,specification,department,unit,pack_size,case_pack_size,active)
-      values(v_id,v_code,v_name,left(coalesce(p_data->>'specification',''),200),p_data->>'department',v_unit,v_pack,v_case,coalesce((p_data->>'active')::boolean,true))
+    if v_exists and (r.department<>p_data->>'department' or r.unit<>v_unit) and exists(select 1 from public.orders_items where product_id=v_id) then raise exception '注文で使用済みの商品のカテゴリ・数量単位は変更できません。別の商品として登録してください。'; end if;
+    insert into public.orders_products(id,code,name,specification,department,unit,pack_size,case_pack_size,band_box_count,notes,active)
+      values(v_id,v_code,v_name,left(coalesce(p_data->>'specification',''),200),p_data->>'department',v_unit,v_pack,v_case,v_band,v_notes,coalesce((p_data->>'active')::boolean,true))
       on conflict(id) do update set code=excluded.code,name=excluded.name,specification=excluded.specification,department=excluded.department,unit=excluded.unit,
-        pack_size=excluded.pack_size,case_pack_size=excluded.case_pack_size,active=excluded.active,revision=orders_products.revision+1,updated_at=now();
+        pack_size=excluded.pack_size,case_pack_size=excluded.case_pack_size,band_box_count=excluded.band_box_count,notes=excluded.notes,active=excluded.active,revision=orders_products.revision+1,updated_at=now();
   elsif p_kind='clients' then
     select * into c from public.orders_clients where id=v_id;
     v_carrier:=case when p_data?'default_carrier_id' then nullif(p_data->>'default_carrier_id','')::uuid else c.default_carrier_id end;

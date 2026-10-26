@@ -54,14 +54,57 @@ test('upgrading legacy master rows adds empty fields without changing any existi
     const s=await seed(rpc);
     const order=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:0,p_header:s.header,p_items:s.items,p_submit:true});
     await db.exec(`drop table orders_client_products;
-      alter table orders_products drop column pack_size,drop column case_pack_size;
+      alter table orders_products drop column pack_size,drop column case_pack_size,drop column band_box_count,drop column notes;
+      drop index orders_products_nonempty_code_unique;
+      alter table orders_products drop constraint orders_products_code_check;
+      alter table orders_products add constraint orders_products_code_check check(length(code) between 1 and 40),add constraint orders_products_code_key unique(code);
       alter table orders_clients drop column store_name,drop column postal_code,drop column default_carrier_id;`);
     await db.exec(deploymentSql());
     const boot=await rpc('admin','orders_bootstrap');
     assert.equal(boot.products.find(p=>p.id===s.product.id).unit,'袋');
     assert.equal(boot.products.find(p=>p.id===s.product.id).pack_size,null);
+    assert.equal(boot.products.find(p=>p.id===s.product.id).band_box_count,null);
+    assert.equal(boot.products.find(p=>p.id===s.product.id).notes,'');
     assert.equal(boot.clients[0].store_name,'');assert.equal(boot.clients[0].postal_code,'');assert.equal(boot.clients[0].default_carrier_id,null);assert.deepEqual(boot.clients[0].product_ids,[]);
     assert.deepEqual(await rpc('sales','orders_detail',{p_order_id:s.orderId}),order);
     await db.exec(deploymentSql());
+  }finally{await db.close();}
+});
+
+test('optional JAN and band box counts preserve order snapshots and master protections',async()=>{
+  const {db,rpc}=await database();
+  try{
+    const s=await seed(rpc);
+    const create=data=>rpc('admin','orders_save_master',{p_kind:'products',p_id:null,p_revision:0,p_data:{name:'JANなし',department:'dry',pack_size:'24',case_pack_size:'4',...data}});
+    const save=(row,data)=>rpc('admin','orders_save_master',{p_kind:'products',p_id:row.id,p_revision:row.revision,p_data:{...row,...data}});
+    let boot=await create({band_box_count:'2',notes:'24入の箱を2箱で1個口'});
+    let product=boot.products.find(p=>p.name==='JANなし');
+    assert.equal(product.code,'');assert.equal(product.pack_size,24);assert.equal(product.case_pack_size,4);assert.equal(product.band_box_count,2);assert.equal(product.notes,'24入の箱を2箱で1個口');
+    boot=await create({name:'別のJANなし',code:'  '});
+    assert.equal(boot.products.filter(p=>p.code==='').length,2);
+    for(const bad of ['0','-1','1.5','text','1000000'])await assert.rejects(save(product,{band_box_count:bad}),/バンド/);
+    await assert.rejects(create({name:''}),/商品名/);
+    await assert.rejects(save(product,{notes:'a'.repeat(2001)}),/備考/);
+    await assert.rejects(save(product,{code:'a'.repeat(41)}),/JANコード/);
+    boot=await save(product,{code:'0490123456789'});product=boot.products.find(p=>p.id===product.id);
+    await assert.rejects(create({code:product.code}),/同じコード/);
+    await assert.rejects(create({code:'  '+product.code+'  '}),/同じコード/);
+    boot=await save(product,{code:''});product=boot.products.find(p=>p.id===product.id);
+    const {band_box_count,notes,...legacy}=product;
+    boot=await rpc('admin','orders_save_master',{p_kind:'products',p_id:product.id,p_revision:product.revision,p_data:{...legacy,name:'旧クライアント編集'}});
+    product=boot.products.find(p=>p.id===product.id);
+    assert.equal(product.band_box_count,band_box_count);assert.equal(product.notes,notes);
+    const items=[{id:crypto.randomUUID(),product_id:product.id,quantity:48}];
+    const order=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:0,p_header:s.header,p_items:items,p_submit:true});
+    assert.equal(order.items[0].product_code,'');assert.equal(order.items[0].quantity,48);
+    boot=await save(product,{band_box_count:'',notes:''});product=boot.products.find(p=>p.id===product.id);
+    assert.equal(product.band_box_count,null);assert.equal(product.notes,'');
+    assert.deepEqual(await rpc('sales','orders_detail',{p_order_id:s.orderId}),order);
+    await assert.rejects(rpc('sales','orders_save_master',{p_kind:'products',p_id:product.id,p_revision:product.revision,p_data:product}),/権限/);
+    await assert.rejects(rpc('admin','orders_save_master',{p_kind:'products',p_id:product.id,p_revision:1,p_data:product}),/更新/);
+    await db.exec(deploymentSql());
+    assert.deepEqual(await rpc('sales','orders_detail',{p_order_id:s.orderId}),order);
+    await assert.rejects(rpc('admin','orders_save_master',{p_kind:'clients',p_id:null,p_revision:0,p_data:{code:'',name:'取引先'}}),/コード/);
+    await assert.rejects(rpc('admin','orders_save_master',{p_kind:'carriers',p_id:null,p_revision:0,p_data:{code:'',name:'配送'}}),/コード/);
   }finally{await db.close();}
 });
