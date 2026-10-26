@@ -13,7 +13,7 @@ test('client destinations are isolated, validated and saved as immutable order s
     const saveOrder=(header=s.header)=>rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:detail?.header.revision??0,p_header:header,p_items:s.items});
     await t.test('multiple destinations persist with postal normalization and no direct or operator writes',async()=>{
       const boot=await saveClient({deliveries:[s.delivery,second]});client=boot.clients.find(c=>c.id===client.id);
-      assert.equal(client.deliveries.length,2);assert.equal(client.deliveries[1].postal_code,'012-3456');
+      assert.equal(client.deliveries.length,3);assert.equal(client.deliveries[0].id,client.id);assert.equal(client.deliveries[0].is_client,true);assert.equal(client.deliveries[2].postal_code,'012-3456');
       await assert.rejects(rpc('sales','orders_save_master',{p_kind:'clients',p_id:client.id,p_revision:client.revision,p_data:client}),/権限/);
       const security=await db.query("select relrowsecurity rls,has_table_privilege('anon',oid,'select,insert,update,delete') allowed from pg_class where oid='orders_client_deliveries'::regclass");
       assert.equal(security.rows[0].rls,true);assert.equal(security.rows[0].allowed,false);
@@ -47,13 +47,13 @@ test('client destinations are isolated, validated and saved as immutable order s
       assert.equal(detail.header.delivery_name,'東倉庫');assert.equal(detail.header.delivery_address,'012-3456 青森市東町');
       await assert.rejects(saveOrder({...s.header,delivery_id:s.delivery.id}),/納品先/);
       const cleared=await saveClient({deliveries:[]});client=cleared.clients.find(c=>c.id===client.id);
-      assert.equal(client.deliveries.filter(d=>d.active).length,0);
+      assert.equal(client.deliveries.filter(d=>d.active).length,1);assert.equal(client.deliveries[0].id,client.id);
       detail=await saveOrder(detail.header);
       assert.equal(detail.header.delivery_name,'東倉庫');
       await assert.rejects(rpc('sales','orders_save',{p_order_id:crypto.randomUUID(),p_revision:0,p_header:{...s.header,delivery_id:second.id},p_items:[{...s.items[0],id:crypto.randomUUID()}]}),/納品先/);
       const {deliveries,...legacyClient}=client;
       const preserved=await rpc('admin','orders_save_master',{p_kind:'clients',p_id:client.id,p_revision:client.revision,p_data:legacyClient});
-      assert.equal(preserved.clients.find(c=>c.id===client.id).deliveries.length,2);
+      assert.equal(preserved.clients.find(c=>c.id===client.id).deliveries.length,3);
       await db.exec(deploymentSql());
     });
   }finally{await db.close();}
@@ -73,7 +73,39 @@ test('legacy orders remain editable without changing their destination or remove
     assert.equal(detail.header.delivery_id,null);assert.equal(detail.header.delivery_name,'旧納品先');assert.equal(detail.header.delivery_address,'旧住所');assert.equal(detail.header.delivery_phone,'旧電話');assert.equal(detail.header.client_reference,'旧番号');
     await assert.rejects(rpc('sales','orders_save',{p_order_id:crypto.randomUUID(),p_revision:0,p_header:header,p_items:[{...s.items[0],id:crypto.randomUUID()}]}),/納品先/);
     await assert.rejects(rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:detail.header.revision,p_header:{...header,delivery_address:'任意の住所'},p_items:s.items}),/納品先/);
-    assert.deepEqual((await rpc('admin','orders_bootstrap')).clients[0].deliveries,[]);
+    assert.equal((await rpc('admin','orders_bootstrap')).clients[0].deliveries[0].is_client,true);
     await db.exec(deploymentSql());
+  }finally{await db.close();}
+});
+
+test('the client is always the first destination, including legacy clients, without changing order snapshots',async()=>{
+  const {db,rpc}=await database();
+  try{
+    const s=await seed(rpc);
+    await db.query('delete from orders_client_deliveries where id=$1',[s.client.id]);
+    const before=(await db.query('select to_jsonb(d) row from orders_client_deliveries d order by id')).rows;
+    await db.exec(deploymentSql());
+    let client=(await rpc('admin','orders_bootstrap')).clients.find(c=>c.id===s.client.id);
+    assert.equal(client.deliveries[0].id,client.id);assert.equal(client.deliveries[0].is_client,true);
+    assert.equal(client.deliveries[1].id,s.delivery.id);
+    assert.deepEqual((await db.query('select to_jsonb(d) row from orders_client_deliveries d order by id')).rows,before,'reading and installing never backfill business rows');
+    let order=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:0,p_header:{...s.header,delivery_id:client.id,delivery_name:'改ざん',delivery_address:'改ざん',delivery_phone:'改ざん'},p_items:s.items});
+    assert.equal(order.header.delivery_id,client.id);assert.equal(order.header.delivery_name,client.name);assert.equal(order.header.delivery_address,client.address);assert.equal(order.header.delivery_phone,client.phone);
+    const boot=await rpc('admin','orders_save_master',{p_kind:'clients',p_id:client.id,p_revision:client.revision,p_data:{...client,name:'新名称',store_name:'本店',address:'新住所',postal_code:'0123456',phone:'017-999',deliveries:[{...client.deliveries[0],name:'無視',address:'改ざん',active:false}]}});
+    client=boot.clients.find(c=>c.id===client.id);
+    assert.equal(client.deliveries[0].name,'新名称 本店');assert.equal(client.deliveries[0].address,'新住所');assert.equal(client.deliveries[0].postal_code,'012-3456');assert.equal(client.deliveries[0].active,true);
+    assert.equal(client.deliveries.find(d=>d.id===s.delivery.id).active,false);
+    assert.deepEqual(await rpc('sales','orders_detail',{p_order_id:s.orderId}),order);
+    order=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:order.header.revision,p_header:{...order.header,notes:'旧納品先を保持'},p_items:s.items});
+    assert.equal(order.header.delivery_address,'青森県');assert.equal(order.header.delivery_name,s.client.name);
+    const fresh=await rpc('sales','orders_save',{p_order_id:crypto.randomUUID(),p_revision:0,p_header:{...s.header,delivery_id:client.id},p_items:[{...s.items[0],id:crypto.randomUUID()}]});
+    assert.equal(fresh.header.delivery_name,'新名称 本店');assert.equal(fresh.header.delivery_address,'012-3456 新住所');assert.equal(fresh.header.delivery_phone,'017-999');
+    assert.equal((await db.query('select count(*)::integer n from orders_client_deliveries where id=client_id')).rows[0].n,1);
+    const newBoot=await rpc('admin','orders_save_master',{p_kind:'clients',p_id:null,p_revision:0,p_data:{code:'NEW',name:'新取引先',address:'住所',phone:'電話'}});
+    const added=newBoot.clients.find(c=>c.code==='NEW');
+    assert.equal(added.deliveries.length,1);assert.equal(added.deliveries[0].id,added.id);assert.equal(added.deliveries[0].name,'新取引先');
+    await db.exec(deploymentSql());
+    assert.deepEqual(await rpc('sales','orders_detail',{p_order_id:s.orderId}),order);
+    assert.equal((await db.query("select has_function_privilege('anon','orders_private.client_destination(uuid)','execute') allowed")).rows[0].allowed,false);
   }finally{await db.close();}
 });

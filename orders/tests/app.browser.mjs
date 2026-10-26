@@ -62,10 +62,12 @@ try {
       assert.equal(await entry.getByLabel('備考',{exact:true}).inputValue(),'');
       await entry.getByLabel('カテゴリ',{exact:true}).selectOption('dry');
       await entry.getByLabel('取引先',{exact:true}).selectOption(emptyClient.id);
-      assert.equal(await entry.getByLabel('納品先',{exact:true}).isDisabled(),true);
+      assert.equal(await entry.getByLabel('納品先',{exact:true}).isDisabled(),false);
+      assert.equal(await entry.getByLabel('納品先',{exact:true}).inputValue(),emptyClient.id);
       assert.equal(await entry.getByLabel('納品先住所',{exact:true}).innerText(),'—');
       await entry.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
-      assert.equal(await entry.getByLabel('納品先',{exact:true}).inputValue(),s.delivery.id);
+      assert.equal(await entry.getByLabel('納品先',{exact:true}).inputValue(),s.client.id);
+      assert.equal(await entry.getByLabel('納品先',{exact:true}).locator('option').nth(1).innerText(),s.client.name);
       assert.equal(await entry.getByLabel('納品先住所',{exact:true}).innerText(),'青森県');
       assert.equal(await entry.getByLabel('納品先電話番号',{exact:true}).innerText(),'000-0000');
       assert.equal(await entry.locator('input[name="delivery_address"],input[name="delivery_phone"],input[name="client_reference"]').count(),0);
@@ -175,6 +177,16 @@ try {
       assert.equal(await productRow.locator('td').nth(4).innerText(),'4');
       assert.equal(await productRow.locator('td').nth(5).innerText(),'2');
       assert.equal(await productRow.locator('td').nth(7).innerText(),'2箱をバンド掛けして1個口');
+      await admin.getByRole('button',{name:'追加',exact:true}).click();
+      await master.getByLabel('カテゴリ',{exact:true}).selectOption('processed');
+      await master.getByLabel('商品名',{exact:true}).fill('JAN重複商品');
+      await master.getByLabel('JANコード',{exact:true}).fill('0490123456789');
+      await master.locator('#jan-warning').filter({hasText:'にんにくペースト'}).waitFor();
+      if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-jan-warning-${width}.png`)});
+      await master.getByRole('button',{name:'保存',exact:true}).click();
+      await admin.locator('.master-table').getByText('JAN重複商品',{exact:true}).waitFor();
+      assert.match(await admin.locator('#notice.warning').innerText(),/重複/);
+      assert.equal((await db.query("select count(*)::integer n from orders_products where code='0490123456789'")).rows[0].n,2);
       for(const name of ['JANなし商品A','JANなし商品B']){
         await admin.getByRole('button',{name:'追加',exact:true}).click();
         await master.getByLabel('カテゴリ',{exact:true}).selectOption('processed');
@@ -193,6 +205,10 @@ try {
       await admin.getByRole('button',{name:'テスト取引先を編集',exact:true}).click();
       await master.getByLabel('店舗名',{exact:true}).fill('本店');
       await master.getByLabel('郵便番号',{exact:true}).fill('0123456');
+      assert.equal(await master.getByLabel('取引先の納品先名',{exact:true}).innerText(),'テスト取引先 本店');
+      assert.equal(await master.getByLabel('取引先の納品先郵便番号',{exact:true}).innerText(),'0123456');
+      assert.equal(await master.getByLabel('取引先の納品先住所',{exact:true}).innerText(),'青森県');
+      assert.equal(await master.locator('#client-delivery button').count(),0);
       await master.getByLabel('基本の配送業者',{exact:true}).selectOption(s.carrier.id);
       await master.getByRole('button',{name:'納品先を追加',exact:true}).click();
       const extraDelivery=master.locator('[data-delivery]').last();
@@ -214,6 +230,7 @@ try {
       assert.deepEqual(await admin.locator('.master-table thead th').allTextContents(),['コード','名称','店舗名','担当者','電話番号','郵便番号','住所','納品先','取扱商品','基本の配送業者','有効','操作']);
       const clientRow=admin.locator('.master-table tbody tr').filter({hasText:'本店'});
       assert.equal(await clientRow.locator('td').nth(5).innerText(),'012-3456');
+      assert.ok((await clientRow.locator('td').nth(7).innerText()).startsWith('テスト取引先 本店、'));
       assert.match(await clientRow.locator('td').nth(7).innerText(),/東倉庫/);
       assert.match(await clientRow.locator('td').nth(8).innerText(),/乾燥にんにく/);
       assert.match(await clientRow.locator('td').nth(8).innerText(),/黒にんにく/);
@@ -229,7 +246,8 @@ try {
       await sales.getByRole('button',{name:'注文入力',exact:true}).click();
       await sales.getByRole('button',{name:'再読み込み',exact:true}).click();
       await entry.getByLabel('取引先',{exact:true}).selectOption(s.client.id);
-      assert.equal(await entry.getByLabel('納品先',{exact:true}).inputValue(),'');
+      assert.equal(await entry.getByLabel('納品先',{exact:true}).inputValue(),s.client.id);
+      assert.equal(await entry.getByLabel('納品先住所',{exact:true}).innerText(),'012-3456 青森県');
       await entry.getByLabel('納品先',{exact:true}).selectOption(extraDeliveryId);
       assert.equal(await entry.getByLabel('納品先住所',{exact:true}).innerText(),'012-3456 青森市東町');
       assert.equal(await entry.getByLabel('納品先電話番号',{exact:true}).innerText(),'017-111-2222');

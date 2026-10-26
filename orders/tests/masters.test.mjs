@@ -55,7 +55,7 @@ test('upgrading legacy master rows adds empty fields without changing any existi
     const order=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:0,p_header:s.header,p_items:s.items,p_submit:true});
     await db.exec(`drop table orders_client_products;
       alter table orders_products drop column pack_size,drop column case_pack_size,drop column band_box_count,drop column notes;
-      drop index orders_products_nonempty_code_unique;
+      drop index orders_products_code_lookup;
       alter table orders_products drop constraint orders_products_code_check;
       alter table orders_products add constraint orders_products_code_check check(length(code) between 1 and 40),add constraint orders_products_code_key unique(code);
       alter table orders_clients drop column store_name,drop column postal_code,drop column default_carrier_id;`);
@@ -87,8 +87,8 @@ test('optional JAN and band box counts preserve order snapshots and master prote
     await assert.rejects(save(product,{notes:'a'.repeat(2001)}),/備考/);
     await assert.rejects(save(product,{code:'a'.repeat(41)}),/JANコード/);
     boot=await save(product,{code:'0490123456789'});product=boot.products.find(p=>p.id===product.id);
-    await assert.rejects(create({code:product.code}),/同じコード/);
-    await assert.rejects(create({code:'  '+product.code+'  '}),/同じコード/);
+    boot=await create({code:product.code});assert.equal(boot.warnings.length,1);assert.match(boot.warnings[0],/重複/);
+    boot=await create({code:'  '+product.code+'  '});assert.equal(boot.products.filter(p=>p.code===product.code).length,3);assert.match(boot.warnings[0],/2商品/);
     boot=await save(product,{code:''});product=boot.products.find(p=>p.id===product.id);
     const {band_box_count,notes,...legacy}=product;
     boot=await rpc('admin','orders_save_master',{p_kind:'products',p_id:product.id,p_revision:product.revision,p_data:{...legacy,name:'旧クライアント編集'}});

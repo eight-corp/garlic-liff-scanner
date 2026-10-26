@@ -29,12 +29,13 @@ alter table public.orders_products
   add column if not exists case_pack_size integer check(case_pack_size between 1 and 999999),
   add column if not exists band_box_count integer check(band_box_count between 1 and 999999),
   add column if not exists notes text not null default '' check(length(notes)<=2000);
--- Empty JAN codes are allowed on multiple products; nonempty codes remain unique.
+-- JAN duplicates are warnings, not uniqueness errors.
 alter table public.orders_products
   drop constraint if exists orders_products_code_key,
   drop constraint if exists orders_products_code_check;
 alter table public.orders_products add constraint orders_products_code_check check(length(code)<=40);
-create unique index if not exists orders_products_nonempty_code_unique on public.orders_products(code) where code<>'';
+drop index if exists public.orders_products_nonempty_code_unique;
+create index if not exists orders_products_code_lookup on public.orders_products(code) where code<>'';
 alter table public.orders_clients
   add column if not exists store_name text not null default '',
   add column if not exists postal_code text not null default '',
@@ -146,6 +147,14 @@ select o.id,o.order_no,o.department,o.client_id,o.client_name,o.delivery_name,o.
     else 'confirmed' end progress,o.delivery_id
 from public.orders_orders o left join public.workers w on w.worker_id=o.created_by;
 
+-- Derive the first destination without rewriting legacy master rows or order snapshots.
+create or replace function orders_private.client_destination(p_client_id uuid)
+returns jsonb language sql stable security definer set search_path=pg_catalog,public as $$
+  select jsonb_build_object('id',c.id,'client_id',c.id,'name',left(concat_ws(' ',c.name,nullif(c.store_name,'')),160),
+    'postal_code',c.postal_code,'address',c.address,'phone',c.phone,'active',true,'position',0,'is_client',true)
+  from public.orders_clients c where c.id=p_client_id;
+$$;
+
 create or replace function public.orders_bootstrap(p_worker_id text)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 begin
@@ -154,7 +163,7 @@ begin
     'canApprove',orders_private.can_approve(),'canMaster',public.business_can('black_garlic_shipping','admin'),
     'clients',coalesce((select jsonb_agg(to_jsonb(c)||jsonb_build_object(
       'product_ids',coalesce((select jsonb_agg(cp.product_id order by cp.product_id) from public.orders_client_products cp where cp.client_id=c.id),'[]'),
-      'deliveries',coalesce((select jsonb_agg(to_jsonb(d) order by d.position,d.id) from public.orders_client_deliveries d where d.client_id=c.id),'[]')) order by c.code) from public.orders_clients c),'[]'),
+      'deliveries',jsonb_build_array(orders_private.client_destination(c.id))||coalesce((select jsonb_agg(to_jsonb(d) order by d.position,d.id) from public.orders_client_deliveries d where d.client_id=c.id and d.id<>c.id),'[]')) order by c.code) from public.orders_clients c),'[]'),
     'products',coalesce((select jsonb_agg(to_jsonb(p) order by department,code) from public.orders_products p),'[]'),
     'carriers',coalesce((select jsonb_agg(to_jsonb(c) order by code) from public.orders_carriers c),'[]'),
     'version',(select count(*)::text||':'||coalesce(max(event_no),0)::text from public.orders_events));
@@ -233,9 +242,19 @@ begin
     and p_header->>'delivery_phone'=r.delivery_phone then
     v_delivery_name:=r.delivery_name; v_delivery_address:=r.delivery_address; v_delivery_phone:=r.delivery_phone;
   else
+    if v_delivery_id=c.id then
+      insert into public.orders_client_deliveries(id,client_id,name,postal_code,address,phone,active,position)
+        values(c.id,c.id,left(concat_ws(' ',c.name,nullif(c.store_name,'')),160),c.postal_code,c.address,c.phone,true,0)
+        on conflict(id) do nothing;
+    end if;
     select * into d from public.orders_client_deliveries where id=v_delivery_id and client_id=c.id and active for share;
     if not found then raise exception '取引先に登録された納品先を選択してください。'; end if;
-    v_delivery_name:=d.name; v_delivery_address:=concat_ws(' ',nullif(d.postal_code,''),nullif(d.address,'')); v_delivery_phone:=d.phone;
+    if v_delivery_id=c.id then
+      v_delivery_name:=left(concat_ws(' ',c.name,nullif(c.store_name,'')),160);
+      v_delivery_address:=concat_ws(' ',nullif(c.postal_code,''),nullif(c.address,'')); v_delivery_phone:=c.phone;
+    else
+      v_delivery_name:=d.name; v_delivery_address:=concat_ws(' ',nullif(d.postal_code,''),nullif(d.address,'')); v_delivery_phone:=d.phone;
+    end if;
   end if;
   if nullif(p_header->>'ordered_on','') is null or nullif(p_header->>'requested_ship_date','') is null then raise exception '注文日・出荷希望日を入力してください。'; end if;
   if v_new then
@@ -355,6 +374,7 @@ declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revisio
   r public.orders_products; c public.orders_clients; v_unit text; v_pack integer; v_case integer; v_band integer; v_notes text;
   v_carrier uuid; v_products uuid[]; v_postal text; v_text text;
   v_delivery_ids uuid[]:='{}'; v_delivery_id uuid; v_delivery jsonb; v_position integer:=0;
+  v_duplicates integer; v_warnings jsonb:='[]';
 begin
   perform orders_private.require_user(p_worker_id,'admin');
   if p_kind is null or p_kind not in ('clients','products','carriers') then raise exception 'マスタが不正です。'; end if;
@@ -411,13 +431,21 @@ begin
       delete from public.orders_client_products where client_id=v_id and not (product_id=any(v_products));
       insert into public.orders_client_products(client_id,product_id) select v_id,x from unnest(v_products) x on conflict do nothing;
     end if;
+    insert into public.orders_client_deliveries(id,client_id,name,postal_code,address,phone,active,position)
+      select client.id,client.id,left(concat_ws(' ',client.name,nullif(client.store_name,'')),160),client.postal_code,client.address,client.phone,true,0
+      from public.orders_clients client where client.id=v_id
+      on conflict(id) do update set name=excluded.name,postal_code=excluded.postal_code,address=excluded.address,
+        phone=excluded.phone,active=true,position=0,updated_at=now() where orders_client_deliveries.client_id=v_id;
+    if not found then raise exception '取引先の納品先IDが競合しています。'; end if;
     if p_data?'deliveries' then
       if jsonb_typeof(p_data->'deliveries') is distinct from 'array' then raise exception '納品先の形式が不正です。'; end if;
       if jsonb_array_length(p_data->'deliveries')>100 then raise exception '納品先は100件までです。'; end if;
       for v_delivery in select value from jsonb_array_elements(p_data->'deliveries') loop
         if jsonb_typeof(v_delivery)<>'object' then raise exception '納品先の形式が不正です。'; end if;
         v_delivery_id:=nullif(v_delivery->>'id','')::uuid;
+        if v_delivery_id=v_id then continue; end if;
         if v_delivery_id is null or v_delivery_id=any(v_delivery_ids) then raise exception '納品先IDが不正です。'; end if;
+        if exists(select 1 from public.orders_clients where id=v_delivery_id) then raise exception '取引先の納品先は自動設定されます。'; end if;
         if exists(select 1 from public.orders_client_deliveries where id=v_delivery_id and client_id<>v_id) then raise exception '別の取引先の納品先は登録できません。'; end if;
         if nullif(btrim(v_delivery->>'name'),'') is null or length(btrim(v_delivery->>'name'))>160 then raise exception '納品先名は160文字以内で入力してください。'; end if;
         if length(coalesce(v_delivery->>'address',''))>500 or length(coalesce(v_delivery->>'phone',''))>60 then raise exception '納品先の住所・電話番号が長すぎます。'; end if;
@@ -431,14 +459,20 @@ begin
           where orders_client_deliveries.client_id=excluded.client_id;
         if not found then raise exception '別の取引先の納品先は登録できません。'; end if;
       end loop;
-      update public.orders_client_deliveries set active=false,updated_at=now() where client_id=v_id and active and not(id=any(v_delivery_ids));
+      update public.orders_client_deliveries set active=false,updated_at=now() where client_id=v_id and id<>v_id and active and not(id=any(v_delivery_ids));
     end if;
   else
     insert into public.orders_carriers(id,code,name,active) values(v_id,v_code,v_name,coalesce((p_data->>'active')::boolean,true))
       on conflict(id) do update set code=excluded.code,name=excluded.name,active=excluded.active,revision=orders_carriers.revision+1,updated_at=now();
   end if;
   perform orders_private.event(null,p_worker_id,'master',jsonb_build_object('kind',p_kind,'id',v_id));
-  return public.orders_bootstrap(p_worker_id);
+  if p_kind='products' and v_code<>'' then
+    select count(*) into v_duplicates from public.orders_products where code=v_code and id<>v_id;
+    if v_duplicates>0 then
+      v_warnings:=jsonb_build_array(format('JANコード「%s」は他の%s商品と重複しています。',v_code,v_duplicates));
+    end if;
+  end if;
+  return public.orders_bootstrap(p_worker_id)||jsonb_build_object('warnings',v_warnings);
 exception when unique_violation then raise exception '同じコード（商品はJANコード）が登録されています。';
 end; $$;
 

@@ -14,7 +14,7 @@ const state={session:null,boot:null,view:'input',master:'products',masterQuery:'
   progress:{q:'',department:'',status:'',start:'',end:'',mine:false,open:true,offset:0},
   search:{q:'',department:'',status:'',start:'',end:'',mine:false,open:false,offset:0}
 }};
-function notice(text,error=false){$('notice').hidden=!text;$('notice').className=error?'error':'';$('notice').innerHTML=`<span>${esc(text)}</span><button type="button" class="icon-button" data-action="dismiss-notice" title="閉じる" aria-label="通知を閉じる">${icon('close')}</button>`;}
+function notice(text,error=false,warning=false){$('notice').hidden=!text;$('notice').className=error?'error':warning?'warning':'';$('notice').innerHTML=`<span>${esc(text)}</span><button type="button" class="icon-button" data-action="dismiss-notice" title="閉じる" aria-label="通知を閉じる">${icon('close')}</button>`;}
 function showError(id,error){const box=$(id);box.hidden=false;box.textContent=error.message||String(error);box.scrollIntoView({block:'nearest'});}
 async function rpc(name,args={}){return auth.rpc(name,{p_worker_id:state.session.workerId,...args});}
 async function busy(root,fn,errorId){const controls=[...root.querySelectorAll('button,input,select,textarea')].map(el=>[el,el.disabled]);controls.forEach(([el])=>el.disabled=true);root.setAttribute('aria-busy','true');if(errorId)$(errorId).hidden=true;try{return await fn();}catch(error){if(errorId)showError(errorId,error);else notice(error.message,true);return null;}finally{controls.forEach(([el,disabled])=>{if(el.isConnected)el.disabled=disabled;});root.removeAttribute('aria-busy');}}
@@ -115,6 +115,19 @@ function deliveryRow(delivery={id:crypto.randomUUID(),name:'',postal_code:'',add
     ${field('納品先電話番号','destination_phone',delivery.phone,'tel','aria-label="納品先の電話番号" maxlength="60"')}
     <div class="row"><label class="check"><input type="checkbox" name="destination_active" ${delivery.active?'checked':''}>有効</label><button type="button" class="icon-button" data-action="remove-delivery" title="納品先を削除" aria-label="納品先を削除">${icon('trash')}</button></div></div>`;
 }
+function clientDeliveryFields(record){
+  return `<div class="read-field"><span>納品先名</span><output aria-label="取引先の納品先名">${esc([record.name,record.store_name].filter(Boolean).join(' '))}</output></div>
+    <div class="read-field"><span>郵便番号</span><output aria-label="取引先の納品先郵便番号">${esc(record.postal_code)}</output></div>
+    <div class="read-field full"><span>住所</span><output aria-label="取引先の納品先住所">${esc(record.address)}</output></div>
+    <div class="read-field"><span>電話番号</span><output aria-label="取引先の納品先電話番号">${esc(record.phone)}</output></div>`;
+}
+function updateJanWarning(form){
+  if(form?.dataset.kind!=='products')return;
+  const code=form.elements.code.value.trim();
+  const duplicates=state.boot.products.filter(p=>code&&p.id!==form.dataset.id&&p.code===code);
+  const warning=$('jan-warning');warning.hidden=!duplicates.length;
+  warning.textContent=duplicates.length?`JANコードが「${duplicates.map(p=>p.name).join('、')}」と重複しています。`:'';
+}
 function masterDialog(id){
   if(!capabilities().canMaster)return;
   const kind=state.master;
@@ -126,6 +139,7 @@ function masterDialog(id){
       ${field('入数','pack_size',record.pack_size??'','text','inputmode="numeric" maxlength="6"')}${field('大箱入数','case_pack_size',record.case_pack_size??'','text','inputmode="numeric" maxlength="6"')}
       ${field('バンド','band_box_count',record.band_box_count??'','text','inputmode="numeric" maxlength="6" title="1個口にバンド掛けできる箱数"')}
       ${field('JANコード','code',record.code,'text','maxlength="40" inputmode="numeric"')}
+      <div id="jan-warning" class="warning full" role="status" hidden></div>
       <label class="full">備考<textarea name="notes" maxlength="2000">${esc(record.notes||'')}</textarea></label>`;
   }else{
     fields=`${field('コード','code',record.code,'text','required maxlength="40"')}${field('名称','name',record.name,'text','required maxlength="160"')}`;
@@ -136,12 +150,13 @@ function masterDialog(id){
         ${field('電話番号','phone',record.phone,'tel','maxlength="60"')}${field('郵便番号','postal_code',record.postal_code,'text','inputmode="numeric" maxlength="8" autocomplete="postal-code"')}
         <label class="full">住所<input name="address" value="${esc(record.address)}" maxlength="500"></label>
         <label class="full">基本の配送業者<select name="default_carrier_id" aria-label="基本の配送業者">${options(state.boot.carriers.filter(c=>c.active||c.id===record.default_carrier_id).map(c=>({...c,label:c.name+(c.active?'':'（無効）')})),record.default_carrier_id,'未設定')}</select></label>
-        <section class="delivery-editor full" aria-label="納品先一覧"><div class="section-heading"><h3>納品先</h3>${button('add-delivery','納品先を追加','plus')}</div><div id="delivery-rows">${(record.deliveries||[]).map(deliveryRow).join('')}</div></section>
+        <section class="delivery-editor full" aria-label="納品先一覧"><div class="section-heading"><h3>納品先</h3>${button('add-delivery','納品先を追加','plus')}</div><div id="client-delivery" class="delivery-row">${clientDeliveryFields(record)}</div><div id="delivery-rows">${(record.deliveries||[]).filter(d=>!d.is_client&&d.id!==record.id).map(deliveryRow).join('')}</div></section>
         <fieldset class="product-choices full"><legend>取扱商品</legend><label>商品検索<input type="search" id="product-choice-filter" aria-label="取扱商品を検索" placeholder="JANコード・商品名・カテゴリ"></label>
         <div class="product-choice-list">${products.map(p=>`<label class="product-choice" data-product-search="${esc([p.code,p.name,p.specification,departments[p.department]].join(' ').toLocaleLowerCase())}"><input type="checkbox" name="product_ids" value="${p.id}" aria-label="${esc(p.name+'（'+p.code+'）')}" ${selected.has(p.id)?'checked':''}><span><strong>${esc(p.name)}${p.active?'':'（無効）'}</strong><small>${esc([p.code,departments[p.department],p.specification].filter(Boolean).join(' / '))}</small></span></label>`).join('')}${products.length?'':'<div class="empty">登録がありません</div>'}</div><div id="product-choice-empty" class="empty" hidden>該当する商品はありません</div></fieldset>`;
     }
   }
   actionDialog(masterNames[kind]+'・'+(id?'編集':'追加'),`<form id="master-form" data-kind="${kind}" data-id="${record.id}" data-revision="${record.revision}" novalidate><div class="form-grid">${fields}<label class="check"><input name="active" type="checkbox" ${record.active?'checked':''}>有効</label></div><div class="dialog-actions">${button('close-action','取消','close')}<button class="primary" type="submit">${icon('save')}保存</button></div></form>`);
+  updateJanWarning($('master-form'));
 }
 
 document.addEventListener('click',async event=>{
@@ -169,6 +184,11 @@ document.addEventListener('click',async event=>{
   if(action==='logout'){if(!confirm('ログアウトしますか？'))return;await busy($('view'),async()=>{await auth.logout();location.href='../menu.html?openExternalBrowser=1';});}
 });
 document.addEventListener('input',event=>{
+  const masterForm=event.target.closest('#master-form');
+  if(masterForm?.dataset.kind==='products'&&event.target.name==='code')updateJanWarning(masterForm);
+  if(masterForm?.dataset.kind==='clients'&&['name','store_name','postal_code','address','phone'].includes(event.target.name)){
+    $('client-delivery').innerHTML=clientDeliveryFields(Object.fromEntries(new FormData(masterForm)));
+  }
   if(event.target.id==='product-choice-filter'){
     const query=event.target.value.trim().toLocaleLowerCase();
     const choices=[...document.querySelectorAll('[data-product-search]')];
@@ -186,7 +206,7 @@ document.addEventListener('change',event=>{
   const target=event.target;
   const ctx=draftContext(target),draft=ctx.draft;
   if(target.dataset.header==='department'&&draft){if(draft.items.some(i=>i.product_id)&&!confirm('カテゴリを変更し、商品明細をリセットしますか？')){target.value=draft.header.department;return;}draft.header.department=target.value;draft.items=[{id:crypto.randomUUID(),product_id:'',quantity:'1'}];ctx.markDirty();renderDraft(ctx.target);}
-  if(target.dataset.header==='client_id'&&draft){const client=state.boot.clients.find(c=>c.id===target.value);draft.header.client_id=target.value;const deliveries=(client?.deliveries||[]).filter(d=>d.active);setDelivery(draft.header,deliveries.length===1?deliveries[0]:null);ctx.markDirty();renderDraft(ctx.target);}
+  if(target.dataset.header==='client_id'&&draft){const client=state.boot.clients.find(c=>c.id===target.value);draft.header.client_id=target.value;const deliveries=(client?.deliveries||[]).filter(d=>d.active);setDelivery(draft.header,deliveries[0]);ctx.markDirty();renderDraft(ctx.target);}
   if(target.dataset.header==='delivery_id'&&draft){if(target.value==='__saved__'){const saved=state.detail.header;for(const key of ['delivery_id','delivery_name','delivery_address','delivery_phone'])draft.header[key]=saved[key]||'';}else{const client=state.boot.clients.find(c=>c.id===draft.header.client_id);setDelivery(draft.header,client?.deliveries?.find(d=>d.id===target.value&&d.active));}ctx.markDirty();renderDraft(ctx.target);}
   if(target.dataset.product&&draft){draft.items.find(i=>i.id===target.dataset.product).product_id=target.value;ctx.markDirty();renderDraft(ctx.target);}
   const shipmentRow=target.closest('[data-ship-item]');if(shipmentRow&&target.name==='include')shipmentRow.querySelector('[name="quantity"]').disabled=!target.checked;
@@ -213,7 +233,7 @@ document.addEventListener('submit',async event=>{
     return;
   }
   if(form.dataset.progress){await busy($('order-dialog'),async()=>{const data=await rpc('orders_progress',{p_order_id:state.detail.header.id,p_revision:state.detail.header.revision,p_item_id:form.dataset.progress,p_status:form.elements.status.value,p_note:form.elements.note.value});state.progressDrafts.delete(form.dataset.progress);await applyDetail(data,'進捗を保存しました。');},'order-error');return;}
-  if(form.id==='master-form'){const values=new FormData(form),data=Object.fromEntries(values);data.active=form.elements.active.checked;if(form.dataset.kind==='clients'){data.product_ids=values.getAll('product_ids');data.deliveries=[...form.querySelectorAll('[data-delivery]')].map(row=>({id:row.dataset.delivery,name:row.querySelector('[name="destination_name"]').value,postal_code:row.querySelector('[name="destination_postal"]').value,address:row.querySelector('[name="destination_address"]').value,phone:row.querySelector('[name="destination_phone"]').value,active:row.querySelector('[name="destination_active"]').checked}));for(const key of ['destination_name','destination_postal','destination_address','destination_phone','destination_active'])delete data[key];}if(form.dataset.kind==='products')for(const key of ['pack_size','case_pack_size','band_box_count'])data[key]=String(data[key]??'').normalize('NFKC').trim();await busy($('action-dialog'),async()=>{state.boot=await rpc('orders_save_master',{p_kind:form.dataset.kind,p_id:form.dataset.id||null,p_revision:Number(form.dataset.revision),p_data:data});state.version=state.boot.version;state.actionDirty=false;$('action-dialog').close();renderMaster();notice('マスタを保存しました。');},'action-error');return;}
+  if(form.id==='master-form'){const values=new FormData(form),data=Object.fromEntries(values);data.active=form.elements.active.checked;if(form.dataset.kind==='clients'){data.product_ids=values.getAll('product_ids');data.deliveries=[...form.querySelectorAll('[data-delivery]')].map(row=>({id:row.dataset.delivery,name:row.querySelector('[name="destination_name"]').value,postal_code:row.querySelector('[name="destination_postal"]').value,address:row.querySelector('[name="destination_address"]').value,phone:row.querySelector('[name="destination_phone"]').value,active:row.querySelector('[name="destination_active"]').checked}));for(const key of ['destination_name','destination_postal','destination_address','destination_phone','destination_active'])delete data[key];}if(form.dataset.kind==='products')for(const key of ['pack_size','case_pack_size','band_box_count'])data[key]=String(data[key]??'').normalize('NFKC').trim();await busy($('action-dialog'),async()=>{state.boot=await rpc('orders_save_master',{p_kind:form.dataset.kind,p_id:form.dataset.id||null,p_revision:Number(form.dataset.revision),p_data:data});state.version=state.boot.version;state.actionDirty=false;$('action-dialog').close();renderMaster();notice(['マスタを保存しました。',...(state.boot.warnings||[])].join(' '),false,!!state.boot.warnings?.length);},'action-error');return;}
   if(form.id==='decision-form'){await busy($('action-dialog'),async()=>{const data=await rpc('orders_decide',{p_order_id:state.detail.header.id,p_revision:state.detail.header.revision,p_action:form.dataset.decision,p_reason:form.elements.reason?.value||''});state.actionDirty=false;$('action-dialog').close();await applyDetail(data,'注文の状態を更新しました。');},'action-error');return;}
   if(form.id==='shipment-form'){await busy($('action-dialog'),async()=>{const values={shipped_on:form.elements.shipped_on.value,carrier_id:form.elements.carrier_id.value,tracking_no:form.elements.tracking_no.value,notes:form.elements.notes.value};const items=[...form.querySelectorAll('[data-ship-item]')].filter(row=>row.querySelector('[name="include"]').checked).map(row=>({item_id:row.dataset.shipItem,quantity:quantity(row.querySelector('[name="quantity"]').value)}));if(!items.length)throw new Error('出荷する明細を選択してください。');const data=await rpc('orders_ship',{p_order_id:state.detail.header.id,p_revision:state.detail.header.revision,p_shipment_id:form.dataset.shipment,p_data:{...values,carrier_id:values.carrier_id||null,items}});state.actionDirty=false;$('action-dialog').close();await applyDetail(data,'出荷を登録しました。');},'action-error');return;}
   if(form.id==='void-form'){await busy($('action-dialog'),async()=>{const data=await rpc('orders_void_shipment',{p_order_id:state.detail.header.id,p_revision:state.detail.header.revision,p_shipment_id:form.dataset.shipment,p_reason:form.elements.reason.value});state.actionDirty=false;$('action-dialog').close();await applyDetail(data,'出荷記録を取消しました。');},'action-error');}
