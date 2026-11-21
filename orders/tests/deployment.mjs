@@ -6,6 +6,7 @@ export function deploymentSql(){
 set local lock_timeout='5s';
 set local statement_timeout='90s';
 create temp table orders_deployment_guard(schema_name text,table_name text,column_sql text,row_count bigint,fingerprint text) on commit drop;
+alter table orders_deployment_guard enable row level security;
 do $guard$
 declare r record; n bigint; h text; filter_sql text; columns_sql text;
 begin
@@ -31,6 +32,8 @@ begin
   end loop;
   if (select count(*) from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname in ('orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events') and c.relrowsecurity)<>10 then raise exception 'RLS check failed'; end if;
   if exists(select 1 from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname like 'orders\\_%' escape '\\' and c.relkind='r' and (has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') or has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE'))) then raise exception 'Direct table access detected'; end if;
+  if has_function_privilege('anon','orders_private.save_master(text,text,uuid,integer,jsonb)','EXECUTE')
+    or has_function_privilege('authenticated','orders_private.save_master(text,text,uuid,integer,jsonb)','EXECUTE') then raise exception 'Private master writer is exposed'; end if;
 end; $verify$;
 select 'Orders installed; existing business data and user permissions unchanged' result,
   (select count(*) from orders_deployment_guard) existing_tables_verified,

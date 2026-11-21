@@ -367,7 +367,7 @@ begin
   return public.orders_detail(p_worker_id,p_order_id);
 end; $$;
 
-create or replace function public.orders_save_master(p_worker_id text,p_kind text,p_id uuid,p_revision integer,p_data jsonb)
+create or replace function orders_private.save_master(p_worker_id text,p_kind text,p_id uuid,p_revision integer,p_data jsonb)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revision integer;
   v_code text:=btrim(p_data->>'code'); v_name text:=btrim(p_data->>'name');
@@ -376,7 +376,7 @@ declare v_id uuid:=coalesce(p_id,gen_random_uuid()); v_exists boolean; v_revisio
   v_delivery_ids uuid[]:='{}'; v_delivery_id uuid; v_delivery jsonb; v_position integer:=0;
   v_duplicates integer; v_warnings jsonb:='[]';
 begin
-  perform orders_private.require_user(p_worker_id,'admin');
+  perform pg_advisory_xact_lock(20261121,1);
   if p_kind is null or p_kind not in ('clients','products','carriers') then raise exception 'マスタが不正です。'; end if;
   if p_kind='products' then
     v_code:=coalesce(v_code,'');
@@ -472,8 +472,73 @@ begin
       v_warnings:=jsonb_build_array(format('JANコード「%s」は他の%s商品と重複しています。',v_code,v_duplicates));
     end if;
   end if;
-  return public.orders_bootstrap(p_worker_id)||jsonb_build_object('warnings',v_warnings);
+  return v_warnings;
 exception when unique_violation then raise exception '同じコード（商品はJANコード）が登録されています。';
+end; $$;
+
+create or replace function public.orders_save_master(p_worker_id text,p_kind text,p_id uuid,p_revision integer,p_data jsonb)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
+declare v_warnings jsonb;
+begin
+  perform orders_private.require_user(p_worker_id,'admin');
+  v_warnings:=orders_private.save_master(p_worker_id,p_kind,p_id,p_revision,p_data);
+  return public.orders_bootstrap(p_worker_id)||jsonb_build_object('warnings',v_warnings);
+end; $$;
+
+create or replace function public.orders_create_entry_master(p_worker_id text,p_kind text,p_id uuid,p_data jsonb)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
+declare v_client public.orders_clients; v_client_id uuid; v_position integer; v_result jsonb;
+  v_name text:=btrim(coalesce(p_data->>'name','')); v_postal text;
+  v_address text:=btrim(coalesce(p_data->>'address','')); v_phone text:=btrim(coalesce(p_data->>'phone',''));
+  v_request text:=md5(p_data::text);
+begin
+  perform orders_private.require_user(p_worker_id,'operator');
+  if p_kind is null or p_kind not in ('clients','products','deliveries') or p_id is null
+    or jsonb_typeof(p_data) is distinct from 'object' then raise exception '追加内容が不正です。'; end if;
+  perform pg_advisory_xact_lock(20261121,1);
+  if exists(select 1 from public.orders_events where kind='entry_master' and actor_id=p_worker_id
+    and detail @> jsonb_build_object('kind',p_kind,'id',p_id,'request',v_request)) then
+    return public.orders_bootstrap(p_worker_id);
+  end if;
+  if exists(select 1 from public.orders_clients where id=p_id)
+    or exists(select 1 from public.orders_products where id=p_id)
+    or exists(select 1 from public.orders_client_deliveries where id=p_id)
+    or exists(select 1 from public.orders_carriers where id=p_id) then raise exception '追加先のIDはすでに使用されています。'; end if;
+
+  if p_kind='products' then
+    v_result:=orders_private.save_master(p_worker_id,'products',p_id,0,jsonb_build_object(
+      'name',p_data->>'name','code',p_data->>'code','department',p_data->>'department','specification',p_data->>'specification',
+      'pack_size',p_data->>'pack_size','case_pack_size',p_data->>'case_pack_size','band_box_count',p_data->>'band_box_count','notes',p_data->>'notes'));
+  elsif p_kind='clients' then
+    v_result:=orders_private.save_master(p_worker_id,'clients',p_id,0,jsonb_build_object(
+      'code',p_data->>'code','name',p_data->>'name','store_name',p_data->>'store_name','contact_name',p_data->>'contact_name',
+      'phone',v_phone,'address',v_address,'postal_code',p_data->>'postal_code','default_carrier_id',p_data->>'default_carrier_id'));
+  else
+    v_client_id:=nullif(p_data->>'client_id','')::uuid;
+    select * into v_client from public.orders_clients where id=v_client_id and active for update;
+    if not found then raise exception '有効な取引先を選択し直してください。'; end if;
+    if length(v_name) not between 1 and 160 or length(v_address)>500 or length(v_phone)>60 then
+      raise exception '納品先名・住所・電話番号を確認してください。';
+    end if;
+    v_postal:=translate(btrim(coalesce(p_data->>'postal_code','')),'０１２３４５６７８９－','0123456789-');
+    if v_postal<>'' and v_postal!~'^[0-9]{3}-?[0-9]{4}$' then raise exception '郵便番号は7桁の数字で入力してください。'; end if;
+    if length(v_postal)=7 then v_postal:=left(v_postal,3)||'-'||right(v_postal,4); end if;
+    if exists(select 1 from public.orders_client_deliveries where client_id=v_client_id and id<>v_client_id
+      and lower(btrim(name))=lower(v_name) and btrim(address)=v_address and postal_code=v_postal and btrim(phone)=v_phone)
+      or (lower(orders_private.client_destination(v_client_id)->>'name')=lower(v_name)
+          and v_client.address=v_address and v_client.postal_code=v_postal and v_client.phone=v_phone) then
+      raise exception '同じ納品先が登録済みです。一覧から選択してください。';
+    end if;
+    if (select count(*) from public.orders_client_deliveries where client_id=v_client_id and id<>v_client_id and active)>=100 then
+      raise exception '追加の有効な納品先は100件までです。';
+    end if;
+    select coalesce(max(position),0)+1 into v_position from public.orders_client_deliveries where client_id=v_client_id;
+    insert into public.orders_client_deliveries(id,client_id,name,postal_code,address,phone,position)
+      values(p_id,v_client_id,v_name,v_postal,v_address,v_phone,v_position);
+    update public.orders_clients set revision=revision+1,updated_at=now() where id=v_client_id;
+  end if;
+  perform orders_private.event(null,p_worker_id,'entry_master',jsonb_build_object('kind',p_kind,'id',p_id,'request',v_request));
+  return public.orders_bootstrap(p_worker_id)||jsonb_build_object('warnings',coalesce(v_result,'[]'));
 end; $$;
 
 revoke all on all functions in schema orders_private from public,anon,authenticated;
@@ -481,7 +546,7 @@ do $permissions$
 declare r record;
 begin
   for r in select p.oid::regprocedure signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname='public' and p.proname in ('orders_bootstrap','orders_version','orders_list','orders_detail','orders_save','orders_decide','orders_progress','orders_ship','orders_void_shipment','orders_save_master') loop
+    where n.nspname='public' and p.proname in ('orders_bootstrap','orders_version','orders_list','orders_detail','orders_save','orders_decide','orders_progress','orders_ship','orders_void_shipment','orders_save_master','orders_create_entry_master') loop
     execute format('revoke all on function %s from public,anon,authenticated',r.signature);
     execute format('grant execute on function %s to anon,authenticated',r.signature);
   end loop;

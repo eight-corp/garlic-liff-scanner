@@ -6,6 +6,11 @@ export const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<
 export const number=value=>Number(value??0).toLocaleString('ja-JP',{maximumFractionDigits:3});
 export const remaining=item=>Math.round((Number(item.quantity)-Number(item.shipped_quantity??0))*1000)/1000;
 export const orderNumber=value=>'J-'+String(value).padStart(6,'0');
+export function matchesOrderChoice(query,fields){
+  const normalize=value=>String(value??'').normalize('NFKC').toLowerCase();
+  const text=fields.map(normalize).join(' ');
+  return normalize(query).trim().split(/\s+/).every(term=>text.includes(term));
+}
 export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 export const date=value=>value?String(value).slice(0,10).replaceAll('-','/'):'—';
 export const time=value=>value?new Date(value).toLocaleString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
