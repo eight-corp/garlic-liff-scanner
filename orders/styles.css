@@ -57,6 +57,7 @@
 @media print{.column-filter-toggle,#progress-column-menu{display:none!important}}
 .list-table{min-width:740px}
 .order-link{max-width:240px;text-align:left;white-space:normal;overflow-wrap:anywhere}
+#progress-column-table .order-group-start td{border-top:2px solid #81988a}
 .ship-table .ship-product,.ship-table [data-ship-total]{overflow-wrap:anywhere}
 @media(max-width:760px){
   .ship-table{min-width:0;table-layout:fixed}

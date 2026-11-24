@@ -61,5 +61,18 @@ test('progress is sorted by ship date and total order quantity before pagination
     assert.deepEqual(filtered.rows.map(row=>row.id),[tie,bigger,smaller]);
     const search=await list({columns:{progress:{include:['draft']}}});
     assert.deepEqual(search.rows.map(row=>row.id),[tie,earlier,later,smaller,bigger]);
+    assert.equal(search.rows.some(row=>'line_id' in row),false);
+    const detail=filters=>list({sort:'shipping_priority',detail_rows:true,...filters});
+    assert.equal((await detail({})).total,55);
+    const secondDetail=await detail({offset:50});
+    assert.deepEqual(secondDetail.rows.map(row=>row.id),[tie,bigger,bigger,smaller,later]);
+    assert.deepEqual(secondDetail.rows.filter(row=>row.id===bigger).map(row=>[row.product_name,row.order_quantity]),
+      [['乾燥にんにく','6.5 袋'],['黒にんにく','6 箱']]);
+    assert.equal(new Set(secondDetail.rows.map(row=>row.line_id)).size,5);
+    assert.deepEqual((await list({facet:'order_quantity',facet_text:'６．５'})).values,['6.5 袋']);
+    assert.deepEqual((await list({facet:'product_name',facet_text:'黒'})).values,['黒にんにく']);
+    assert.deepEqual((await detail({columns:{product_name:{include:['黒にんにく']}}})).rows.map(row=>[row.id,row.order_quantity]),[[bigger,'6 箱']]);
+    assert.equal((await detail({columns:{product_name:{include:['乾燥にんにく']},order_quantity:{include:['6 箱']}}})).total,0);
+    assert.equal((await db.query("select has_function_privilege('anon','orders_private.progress_line_value(public.orders_items,text)','EXECUTE') allowed")).rows[0].allowed,false);
   }finally{await db.close();}
 });

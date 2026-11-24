@@ -21,7 +21,7 @@ const searchColumns=[
   shipmentProgressColumn,['creator_name','登録担当者'],['updated_at','更新日時']
 ];
 const progressColumns=[statusColumn,...searchColumns.flatMap(column=>
-  column===statusColumn?[]:column===shipmentProgressColumn?[column,['shipped_quantity_total','合計出荷数量']]:[column]
+  column===statusColumn?[]:column===shipmentProgressColumn?[['product_name','商品名'],['order_quantity','注文数'],column]:[column]
 )];
 let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
@@ -41,6 +41,7 @@ function listFilters(){
   const filters={...state.filters[state.view]};
   if(state.view==='progress'){
     filters.sort='shipping_priority';
+    filters.detail_rows=true;
     filters.columns=Object.fromEntries(progressColumns.flatMap(([key,,choices])=>{
       const filter=filters.columns[key];
       if(!filter)return [];
@@ -59,14 +60,16 @@ function filterForm(){const f=state.filters.search;return `<form id="filter-form
   <div class="row filter-actions"><button class="primary" type="submit">${icon('search')}検索</button><button type="button" class="icon-button" data-action="clear-filters" title="絞り込みをクリア" aria-label="絞り込みをクリア">${icon('reset')}</button></div>
   </form>`;}
 function listRows(columns,progress){
-  return state.list.rows.map(o=>{
+  return state.list.rows.map((o,index,rows)=>{
+    const startsOrder=progress&&index>0&&rows[index-1].id!==o.id;
     const cells={
       client_name:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${esc(o.client_name)}の注文を開く">${esc(o.client_name)}</button>`,
       delivery_name:esc(o.delivery_name),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
-      shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,shipped_quantity_total:esc(o.shipped_quantity_total??'—'),creator_name:esc(o.creator_name),
+      product_name:esc(o.product_name??'—'),order_quantity:esc(o.order_quantity??'—'),
+      shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
       updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
     };
-    return `<tr data-order="${o.id}">${columns.map(([key])=>`<td${key==='shipment_progress'||key==='shipped_quantity_total'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
+    return `<tr data-order="${o.id}"${startsOrder?' class="order-group-start"':''}>${columns.map(([key])=>`<td${key==='shipment_progress'||key==='order_quantity'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
   }).join('');
 }
 function renderList(){
