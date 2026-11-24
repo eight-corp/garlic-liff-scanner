@@ -22,7 +22,7 @@ const searchColumns=[
 ];
 const progressColumns=[statusColumn,...searchColumns.flatMap(column=>
   column===statusColumn||column[0]==='creator_name'?[]:column===shipmentProgressColumn
-    ?[['product_name','商品名'],['order_quantity','注文数量'],['packed_quantity','合計数量'],column]:[column]
+    ?[['product_name','商品名'],['packed_quantity','合計数量']]:[column]
 )];
 let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
@@ -66,11 +66,11 @@ function listRows(columns,progress){
     const cells={
       client_name:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${esc(o.client_name)}の注文を開く">${esc(o.client_name)}</button>`,
       delivery_name:esc(o.delivery_name),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
-      product_name:esc(o.product_name??'—'),order_quantity:esc(o.order_quantity??'—'),packed_quantity:esc(o.packed_quantity??'—'),
+      product_name:esc(o.product_name??'—'),packed_quantity:esc(o.packed_quantity??'—'),
       shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
       updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
     };
-    return `<tr data-order="${o.id}"${startsOrder?' class="order-group-start"':''}>${columns.map(([key])=>`<td${['shipment_progress','order_quantity','packed_quantity'].includes(key)?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
+    return `<tr data-order="${o.id}"${startsOrder?' class="order-group-start"':''}>${columns.map(([key])=>`<td${key==='shipment_progress'||key==='packed_quantity'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
   }).join('');
 }
 function renderList(){

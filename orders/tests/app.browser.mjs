@@ -184,10 +184,9 @@ try {
       assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
       await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
       await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
-      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','商品名','注文数量','合計数量','出荷済明細','更新日時']);
+      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','商品名','合計数量','更新日時']);
       assert.equal(await office.locator('.list-table tbody td').first().innerText(),'承認待ち');
-      assert.equal(await office.locator('.list-table tbody td').nth(5).innerText(),'10 袋');
-      assert.equal(await office.locator('.list-table tbody td').nth(6).innerText(),'120');
+      assert.equal(await office.locator('.list-table tbody td').nth(5).innerText(),'120');
       assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
       await office.getByRole('button',openClientOrder).press('Enter');
       const officeOrder=office.locator('#order-dialog');
@@ -240,7 +239,7 @@ try {
       await ship.getByLabel('伝票番号',{exact:true}).fill('TEST-001');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
       await order.getByRole('status').filter({hasText:'出荷を登録しました。'}).waitFor();
-      assert.equal(await sales.locator('#order-list-rows td').nth(5).innerText(),'10 袋');
+      assert.equal(await sales.locator('#order-list-rows td').nth(5).innerText(),'120');
       assert.equal(await order.locator('.badge.partial').count(),1);
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'6 袋');
       await office.getByText('他の担当者が更新しました',{exact:true}).waitFor({timeout:12000});
@@ -251,7 +250,7 @@ try {
       assert.equal(await shipTotal.innerText(),'72');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
       await order.getByRole('status').filter({hasText:'出荷を登録しました。'}).waitFor();
-      assert.equal(await sales.locator('#order-list-rows td').nth(5).innerText(),'10 袋');
+      assert.equal(await sales.locator('#order-list-rows td').nth(5).innerText(),'120');
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'0 袋');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
@@ -437,8 +436,8 @@ try {
       assert.equal(await rows.nth(2).locator('td').first().evaluate(cell=>getComputedStyle(cell).borderTopWidth),'2px');
       const mixedRows=rows.filter({has:office.getByRole('button',{name:'テスト取引先 本店の注文を開く',exact:true})});
       assert.equal(await mixedRows.count(),3);
-      assert.deepEqual(await rows.evaluateAll(els=>els.slice(0,2).map(row=>[row.dataset.order,...Array.from(row.cells).slice(4,7).map(cell=>cell.textContent)])),
-        [[officeRecords[0].id,'乾燥にんにく','1 袋','12'],[officeRecords[0].id,'黒にんにく','15 箱','未設定']]);
+      assert.deepEqual(await rows.evaluateAll(els=>els.slice(0,2).map(row=>[row.dataset.order,row.cells[4].textContent,row.cells[5].textContent])),
+        [[officeRecords[0].id,'乾燥にんにく','12'],[officeRecords[0].id,'黒にんにく','未設定']]);
       if(artifacts)await office.screenshot({path:path.join(artifacts,`orders-progress-lines-${width}.png`)});
       await rows.nth(1).getByRole('button',{name:'テスト取引先 本店の注文を開く',exact:true}).click();
       await officeOrder.locator('.detail-table tbody tr').nth(1).waitFor();
@@ -471,7 +470,8 @@ try {
       await office.getByRole('button',{name:'商品名を絞り込む',exact:true}).click();
       await menu.getByRole('searchbox').fill('黒にんにく');
       await office.waitForFunction(()=>document.querySelectorAll('.list-table tbody tr[data-order]').length===1);
-      assert.equal(await rows.first().locator('td').nth(5).innerText(),'15 箱');
+      assert.equal(await rows.first().locator('td').nth(4).innerText(),'黒にんにく');
+      assert.equal(await rows.first().locator('td').nth(5).innerText(),'未設定');
       await menu.getByRole('button',{name:'この列の絞り込みを解除',exact:true}).click();
       await menu.getByRole('searchbox').press('Escape');
       await menu.waitFor({state:'hidden'});
