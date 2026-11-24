@@ -73,6 +73,14 @@ test('progress is sorted by ship date and total order quantity before pagination
     assert.deepEqual((await list({facet:'product_name',facet_text:'黒'})).values,['黒にんにく']);
     assert.deepEqual((await detail({columns:{product_name:{include:['黒にんにく']}}})).rows.map(row=>[row.id,row.order_quantity]),[[bigger,'6 箱']]);
     assert.equal((await detail({columns:{product_name:{include:['乾燥にんにく']},order_quantity:{include:['6 箱']}}})).total,0);
+    assert.equal(secondDetail.rows.find(row=>row.id===bigger).packed_quantity,'未設定');
+    await rpc('admin','orders_save_master',{p_kind:'products',p_id:s.product.id,p_revision:s.product.revision,p_data:{...s.product,pack_size:25}});
+    const withPacks=await detail({offset:50});
+    assert.deepEqual(withPacks.rows.filter(row=>row.id===bigger).map(row=>row.packed_quantity),['162.5','未設定']);
+    assert.equal(withPacks.rows.find(row=>row.id===later).packed_quantity,'2,500');
+    assert.deepEqual((await list({facet:'packed_quantity',facet_text:'１６２．５'})).values,['162.5']);
+    assert.deepEqual((await detail({columns:{packed_quantity:{include:['162.5']}}})).rows.map(row=>row.id),[bigger]);
+    assert.equal((await list({})).rows.some(row=>'packed_quantity' in row),false);
     assert.equal((await db.query("select has_function_privilege('anon','orders_private.progress_line_value(public.orders_items,text)','EXECUTE') allowed")).rows[0].allowed,false);
   }finally{await db.close();}
 });

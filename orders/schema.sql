@@ -226,11 +226,15 @@ returns text language sql stable set search_path=pg_catalog as $$
   end;
 $$;
 create or replace function orders_private.progress_line_value(i public.orders_items,k text)
-returns text language sql immutable set search_path=pg_catalog as $$
+returns text language sql stable set search_path=pg_catalog as $$
   select case k
     when 'product_name' then i.product_name
     when 'order_quantity' then case when i.id is not null then
       concat_ws(' ',rtrim(to_char(i.quantity,'FM999,999,999,990.999'),'.'),nullif(i.unit,'')) end
+    when 'packed_quantity' then case when i.id is not null then coalesce((
+      select rtrim(to_char(i.quantity*p.pack_size,'FM999,999,999,999,999,990.999'),'.')
+      from public.orders_products p where p.id=i.product_id
+    ),'未設定') end
   end;
 $$;
 revoke all on function orders_private.progress_line_value(public.orders_items,text) from public,anon,authenticated;
@@ -245,7 +249,7 @@ declare v_result jsonb; v_offset integer:=greatest(0,coalesce((p_filters->>'offs
   v_term text:=lower(normalize(btrim(left(coalesce(p_filters->>'facet_text',''),160)),NFKC));
 begin
   perform orders_private.require_user(p_worker_id);
-  if v_facet in ('product_name','order_quantity') then
+  if v_facet in ('product_name','order_quantity','packed_quantity') then
     select jsonb_build_object('values',coalesce(jsonb_agg(candidate order by candidate),'[]')) into v_result
       from (select distinct v.candidate from public.orders_items i
         cross join lateral (select orders_private.progress_line_value(i,v_facet) candidate) v
@@ -263,7 +267,8 @@ begin
   end if;
   with filtered as (
     select o.*,i.id line_id,i.position line_position,i.product_name,
-      orders_private.progress_line_value(i,'order_quantity') order_quantity
+      orders_private.progress_line_value(i,'order_quantity') order_quantity,
+      orders_private.progress_line_value(i,'packed_quantity') packed_quantity
     from orders_private.order_summary o
     left join public.orders_items i on v_detail_rows and i.order_id=o.id
     where
@@ -278,7 +283,7 @@ begin
         select 1 from jsonb_each(v_columns) f where not exists (
           select 1 from unnest(case
             when f.key='department' then o.departments
-            when f.key in ('product_name','order_quantity') then array[orders_private.progress_line_value(i,f.key)]
+            when f.key in ('product_name','order_quantity','packed_quantity') then array[orders_private.progress_line_value(i,f.key)]
             else array[orders_private.progress_column_value(o,f.key)] end) v(candidate)
           where position(lower(normalize(btrim(left(coalesce(f.value->>'text',''),160)),NFKC)) in lower(normalize(v.candidate,NFKC)))>0
             and (jsonb_typeof(f.value->'include') is distinct from 'array' or f.value->'include' ? v.candidate)
@@ -294,8 +299,9 @@ begin
   )
   select jsonb_build_object('total',(select count(*) from filtered),'rows',coalesce(
     (select jsonb_agg(
-      (to_jsonb(p)-array['sort_ship_date','sort_quantity','line_position','line_id','product_name','order_quantity'])||
-      case when v_detail_rows then jsonb_build_object('line_id',p.line_id,'product_name',p.product_name,'order_quantity',p.order_quantity) else '{}' end
+      (to_jsonb(p)-array['sort_ship_date','sort_quantity','line_position','line_id','product_name','order_quantity','packed_quantity'])||
+      case when v_detail_rows then jsonb_build_object('line_id',p.line_id,'product_name',p.product_name,
+        'order_quantity',p.order_quantity,'packed_quantity',p.packed_quantity) else '{}' end
       order by p.sort_ship_date asc nulls last,p.sort_quantity desc nulls last,p.order_no desc,p.line_position,p.line_id)
       from page p),'[]')) into v_result;
   return v_result;

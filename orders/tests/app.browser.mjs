@@ -184,9 +184,10 @@ try {
       assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
       await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
       await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
-      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','商品名','注文数','出荷済明細','更新日時']);
+      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','商品名','注文数量','合計数量','出荷済明細','更新日時']);
       assert.equal(await office.locator('.list-table tbody td').first().innerText(),'承認待ち');
       assert.equal(await office.locator('.list-table tbody td').nth(5).innerText(),'10 袋');
+      assert.equal(await office.locator('.list-table tbody td').nth(6).innerText(),'120');
       assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
       await office.getByRole('button',openClientOrder).press('Enter');
       const officeOrder=office.locator('#order-dialog');
@@ -436,8 +437,8 @@ try {
       assert.equal(await rows.nth(2).locator('td').first().evaluate(cell=>getComputedStyle(cell).borderTopWidth),'2px');
       const mixedRows=rows.filter({has:office.getByRole('button',{name:'テスト取引先 本店の注文を開く',exact:true})});
       assert.equal(await mixedRows.count(),3);
-      assert.deepEqual(await rows.evaluateAll(els=>els.slice(0,2).map(row=>[row.dataset.order,row.cells[4].textContent,row.cells[5].textContent])),
-        [[officeRecords[0].id,'乾燥にんにく','1 袋'],[officeRecords[0].id,'黒にんにく','15 箱']]);
+      assert.deepEqual(await rows.evaluateAll(els=>els.slice(0,2).map(row=>[row.dataset.order,...Array.from(row.cells).slice(4,7).map(cell=>cell.textContent)])),
+        [[officeRecords[0].id,'乾燥にんにく','1 袋','12'],[officeRecords[0].id,'黒にんにく','15 箱','未設定']]);
       if(artifacts)await office.screenshot({path:path.join(artifacts,`orders-progress-lines-${width}.png`)});
       await rows.nth(1).getByRole('button',{name:'テスト取引先 本店の注文を開く',exact:true}).click();
       await officeOrder.locator('.detail-table tbody tr').nth(1).waitFor();
