@@ -14,11 +14,13 @@ const pickerButton=(kind,itemId='',disabled=false)=>`<button type="button" class
 let entryPicker=null;
 const maxAttachments=5;
 let previewUrl='';
-const progressColumns=[
+const statusColumn=['progress','状態',statuses];
+const searchColumns=[
   ['order_no','注文番号'],['department','カテゴリ',departments],['client_name','取引先'],['delivery_name','納品先'],
-  ['ordered_on','注文日'],['requested_ship_date','出荷希望日'],['progress','状態',statuses],
+  ['ordered_on','注文日'],['requested_ship_date','出荷希望日'],statusColumn,
   ['shipment_progress','出荷済明細'],['creator_name','登録担当者'],['updated_at','更新日時']
 ];
+const progressColumns=[statusColumn,...searchColumns.filter(column=>column!==statusColumn)];
 let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
   progress:{columns:{},offset:0},
@@ -51,22 +53,32 @@ function filterForm(){const f=state.filters.search;return `<form id="filter-form
   <label class="check"><input type="checkbox" name="open" ${f.open?'checked':''}>未完了のみ</label>
   <div class="row filter-actions"><button class="primary" type="submit">${icon('search')}検索</button><button type="button" class="icon-button" data-action="clear-filters" title="絞り込みをクリア" aria-label="絞り込みをクリア">${icon('reset')}</button></div>
   </form>`;}
-function listRows(){
-  return state.list.rows.map(o=>`<tr data-order="${o.id}"><td><button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${orderNumber(o.order_no)}を開く">${orderNumber(o.order_no)}</button></td><td>${departments[o.department]}</td><td>${esc(o.client_name)}</td><td>${esc(o.delivery_name)}</td><td>${date(o.ordered_on)}</td><td>${date(o.requested_ship_date)}</td><td>${badge(o.progress)}</td><td class="numeric">${o.shipped_item_count} / ${o.item_count}</td><td>${esc(o.creator_name)}</td><td>${state.view==='progress'?time(o.updated_at,'Asia/Tokyo'):time(o.updated_at)}</td></tr>`).join('');
+function listRows(columns,progress){
+  return state.list.rows.map(o=>{
+    const no=orderNumber(o.order_no);
+    const cells={
+      order_no:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${no}を開く">${no}</button>`,
+      department:departments[o.department],client_name:esc(o.client_name),delivery_name:esc(o.delivery_name),
+      ordered_on:date(o.ordered_on),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
+      shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
+      updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
+    };
+    return `<tr data-order="${o.id}">${columns.map(([key])=>`<td${key==='shipment_progress'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
+  }).join('');
 }
 function renderList(){
-  const progress=state.view==='progress';
+  const progress=state.view==='progress',columns=progress?progressColumns:searchColumns;
   if(!progress||!$('progress-column-table')){
     $('view').innerHTML=`<div class="page-heading"><div><h2>${progress?'進捗一覧':'過去注文検索'}</h2><div id="order-list-count" class="muted"></div></div>
       ${progress?button('clear-filters','絞り込み解除','reset'):''}</div>
     ${progress?'':filterForm()}<div class="table-wrap"><table class="list-table" ${progress?'id="progress-column-table"':''}><thead><tr>
-      ${progressColumns.map(([key,label])=>progress?`<th scope="col"><div class="progress-column-heading"><span>${label}</span><button type="button" class="column-filter-toggle" data-action="column-filter" data-column="${key}" aria-expanded="false" aria-controls="progress-column-menu" title="${label}を絞り込む" aria-label="${label}を絞り込む">${icon('filter')}</button></div></th>`:`<th>${label}</th>`).join('')}
+      ${columns.map(([key,label])=>progress?`<th scope="col"><div class="progress-column-heading"><span>${label}</span><button type="button" class="column-filter-toggle" data-action="column-filter" data-column="${key}" aria-expanded="false" aria-controls="progress-column-menu" title="${label}を絞り込む" aria-label="${label}を絞り込む">${icon('filter')}</button></div></th>`:`<th>${label}</th>`).join('')}
     </tr></thead><tbody id="order-list-rows"></tbody></table><div id="order-list-empty" class="empty" hidden>該当する注文はありません</div></div>
     <div class="pager"><span id="order-list-page"></span><button class="icon-button" type="button" data-action="previous-page" title="前のページ" aria-label="前のページ">${icon('left')}</button><button class="icon-button" type="button" data-action="next-page" title="次のページ" aria-label="次のページ">${icon('right')}</button></div>`;
   }
   const offset=state.filters[state.view].offset,total=state.list.total;
   $('order-list-count').textContent=number(total)+'件';
-  $('order-list-rows').innerHTML=listRows();
+  $('order-list-rows').innerHTML=listRows(columns,progress);
   $('order-list-empty').hidden=state.list.rows.length>0;
   $('order-list-page').textContent=total?`${number(offset+1)}–${number(Math.min(offset+50,total))} / ${number(total)}件`:'0件';
   $('view').querySelector('[data-action="previous-page"]').disabled=offset===0;

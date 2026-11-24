@@ -178,7 +178,8 @@ try {
       assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
       await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
       await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
-      assert.equal(await office.locator('.list-table .badge.pending').innerText(),'承認待ち');
+      assert.equal(await office.locator('.list-table thead th').first().innerText(),'状態');
+      assert.equal(await office.locator('.list-table tbody td').first().innerText(),'承認待ち');
       assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
       await office.getByRole('button',{name:'J-000001を開く',exact:true}).click();
       const officeOrder=office.locator('#order-dialog');
@@ -430,6 +431,7 @@ async function assertCategoryList(page){
   const filter=page.locator('#filter-form');
   await filter.getByLabel('カテゴリ',{exact:true}).waitFor();
   assert.equal(await filter.getByLabel('カテゴリ',{exact:true}).locator('option').first().innerText(),'全カテゴリ');
+  assert.equal(await page.locator('.list-table thead th').first().innerText(),'注文番号');
   assert.equal(await page.locator('.list-table thead th').nth(1).innerText(),'カテゴリ');
   assert.doesNotMatch(await page.locator('#view').innerText(),/部署/);
 }
