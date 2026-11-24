@@ -123,7 +123,18 @@ select 'Progress shipping priority applied' as result,
   position('shipping_priority' in pg_get_functiondef('public.orders_list(text,jsonb)'::regprocedure))>0 as installed;`;
 }
 
+export function shippedTotalDeploymentSql(){
+  const schema=readSchema();
+  return `begin;
+set local lock_timeout='5s';
+${schemaSection(schema,'create or replace view orders_private.order_summary','-- Derive the first destination')}
+${schemaSection(schema,'create or replace function orders_private.progress_column_value','create or replace function public.orders_list')}
+commit;
+select 'Order shipment totals applied' as result,
+  position('shipped_quantity_total' in pg_get_viewdef('orders_private.order_summary'::regclass))>0 as installed;`;
+}
+
 if(process.argv[2]){
-  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql,categories:lineCategoriesDeploymentSql,sorting:progressSortingDeploymentSql}[process.argv[3]]||deploymentSql;
+  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql,categories:lineCategoriesDeploymentSql,sorting:progressSortingDeploymentSql,shippedTotal:shippedTotalDeploymentSql}[process.argv[3]]||deploymentSql;
   fs.writeFileSync(process.argv[2],generate());
 }

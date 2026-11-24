@@ -15,11 +15,14 @@ let entryPicker=null;
 const maxAttachments=5;
 let previewUrl='';
 const statusColumn=['progress','状態',statuses];
+const shipmentProgressColumn=['shipment_progress','出荷済明細'];
 const searchColumns=[
   ['client_name','取引先'],['delivery_name','納品先'],['requested_ship_date','出荷希望日'],statusColumn,
-  ['shipment_progress','出荷済明細'],['creator_name','登録担当者'],['updated_at','更新日時']
+  shipmentProgressColumn,['creator_name','登録担当者'],['updated_at','更新日時']
 ];
-const progressColumns=[statusColumn,...searchColumns.filter(column=>column!==statusColumn)];
+const progressColumns=[statusColumn,...searchColumns.flatMap(column=>
+  column===statusColumn?[]:column===shipmentProgressColumn?[column,['shipped_quantity_total','合計出荷数量']]:[column]
+)];
 let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
   progress:{columns:{},offset:0},
@@ -60,10 +63,10 @@ function listRows(columns,progress){
     const cells={
       client_name:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${esc(o.client_name)}の注文を開く">${esc(o.client_name)}</button>`,
       delivery_name:esc(o.delivery_name),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
-      shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
+      shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,shipped_quantity_total:esc(o.shipped_quantity_total??'—'),creator_name:esc(o.creator_name),
       updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
     };
-    return `<tr data-order="${o.id}">${columns.map(([key])=>`<td${key==='shipment_progress'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
+    return `<tr data-order="${o.id}">${columns.map(([key])=>`<td${key==='shipment_progress'||key==='shipped_quantity_total'?' class="numeric"':''}>${cells[key]}</td>`).join('')}</tr>`;
   }).join('');
 }
 function renderList(){

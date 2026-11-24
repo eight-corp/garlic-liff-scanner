@@ -160,7 +160,18 @@ select o.id,o.order_no,coalesce(categories.department_ids[1],o.department) depar
     when not exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'ready') then 'ready'
     when exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'unstarted') then 'working'
     else 'confirmed' end progress,o.delivery_id,o.planned_carrier_id,o.planned_carrier_name,
-  coalesce(categories.department_ids,array_remove(array[o.department],null)) departments
+  coalesce(categories.department_ids,array_remove(array[o.department],null)) departments,
+  coalesce((
+    select string_agg(concat_ws(' ',rtrim(to_char(shipped.quantity,'FM999,999,999,999,999,990.999'),'.'),nullif(shipped.unit,'')),
+      ' / ' order by shipped.unit collate "C")
+    from (
+      select i.unit,sum(si.quantity) quantity
+      from public.orders_shipments s join public.orders_shipment_items si on si.shipment_id=s.id
+        join public.orders_items i on i.id=si.item_id
+      where s.order_id=o.id and s.voided_at is null
+      group by i.unit
+    ) shipped
+  ),'0') shipped_quantity_total
 from public.orders_orders o left join public.workers w on w.worker_id=o.created_by
 left join lateral (
   select array_agg(product_categories.department order by product_categories.first_position) department_ids
@@ -209,6 +220,7 @@ returns text language sql stable set search_path=pg_catalog as $$
     when 'requested_ship_date' then to_char(o.requested_ship_date,'YYYY/MM/DD')
     when 'progress' then o.progress
     when 'shipment_progress' then o.shipped_item_count::text||' / '||o.item_count::text
+    when 'shipped_quantity_total' then o.shipped_quantity_total
     when 'creator_name' then o.creator_name
     when 'updated_at' then to_char(o.updated_at at time zone 'Asia/Tokyo','YYYY/MM/DD HH24:MI')
   end;

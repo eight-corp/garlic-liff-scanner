@@ -184,8 +184,9 @@ try {
       assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
       await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
       await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
-      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','出荷済明細','登録担当者','更新日時']);
+      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','出荷済明細','合計出荷数量','登録担当者','更新日時']);
       assert.equal(await office.locator('.list-table tbody td').first().innerText(),'承認待ち');
+      assert.equal(await office.locator('.list-table tbody td').nth(5).innerText(),'0');
       assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
       await office.getByRole('button',openClientOrder).press('Enter');
       const officeOrder=office.locator('#order-dialog');
@@ -237,6 +238,7 @@ try {
       await ship.getByLabel('伝票番号',{exact:true}).fill('TEST-001');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
       await order.getByRole('status').filter({hasText:'出荷を登録しました。'}).waitFor();
+      await sales.locator('#order-list-rows td').filter({hasText:/^4 袋$/}).waitFor();
       assert.equal(await order.locator('.badge.partial').count(),1);
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'6 袋');
       await office.getByText('他の担当者が更新しました',{exact:true}).waitFor({timeout:12000});
@@ -247,6 +249,7 @@ try {
       assert.equal(await shipTotal.innerText(),'72');
       await ship.getByRole('button',{name:'出荷を登録',exact:true}).click();
       await order.getByRole('status').filter({hasText:'出荷を登録しました。'}).waitFor();
+      await sales.locator('#order-list-rows td').filter({hasText:/^10 袋$/}).waitFor();
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'0 袋');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
