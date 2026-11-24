@@ -1,4 +1,4 @@
-import {departments,statuses,workStatuses,eventNames,esc,number,remaining,orderNumber,today,date,time,quantity,matchesOrderChoice} from './model.js?v=20261121-entry-master';
+import {departments,statuses,workStatuses,eventNames,esc,number,remaining,orderNumber,today,date,time,quantity,matchesOrderChoice,packedQuantity,formatPackedQuantity} from './model.js?v=20261124-pack-totals';
 
 const auth=window.BusinessAuth;
 auth.init(window.BusinessConfig.url,window.BusinessConfig.key);
@@ -25,7 +25,7 @@ async function rpc(name,args={}){return auth.rpc(name,{p_worker_id:state.session
 async function busy(root,fn,errorId){const controls=[...root.querySelectorAll('button,input,select,textarea')].map(el=>[el,el.disabled]);controls.forEach(([el])=>el.disabled=true);root.setAttribute('aria-busy','true');if(errorId)$(errorId).hidden=true;try{return await fn();}catch(error){if(errorId)showError(errorId,error);else notice(error.message,true);return null;}finally{controls.forEach(([el,disabled])=>{if(el.isConnected)el.disabled=disabled;});root.removeAttribute('aria-busy');}}
 function capabilities(){return state.boot||{};}
 function syncLabel(offline=false){$('sync').classList.toggle('offline',offline);$('sync').textContent=offline?'接続できません':'同期 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
-async function bootstrap(){state.boot=await rpc('orders_bootstrap');state.version=state.boot.version;document.querySelector('[data-view="input"]').disabled=!state.boot.canOperate;}
+async function bootstrap(){state.boot=await rpc('orders_bootstrap');state.version=state.boot.version;document.querySelector('[data-view="input"]').disabled=!state.boot.canOperate;refreshPackTotals('entry-form',state.entryDraft);refreshPackTotals('draft-form',state.draft);}
 function listFilters(){const filters={...state.filters[state.view]};if(state.view==='approval')filters.status='pending';if(state.view==='progress')filters.confirmed=true;return filters;}
 function filterForm(){const f=state.filters[state.view];return `<form id="filter-form" class="filters">
   <label class="wide">検索<input name="q" type="search" value="${esc(f.q)}" placeholder="注文番号・取引先・納品先・商品" maxlength="120"></label>
@@ -69,16 +69,35 @@ function draftContext(element){
 async function openOrder(id){await busy($('view'),async()=>{const data=await rpc('orders_detail',{p_order_id:id});state.detail=data;state.draft=null;state.dirty=false;state.detailNotice='';state.progressDrafts.clear();renderDetail();if(!$('order-dialog').open)$('order-dialog').showModal();});}
 function editOrder(){const {header:h,items,attachments}=state.detail;if(!canEditOrder())return;state.draft={id:h.id,revision:h.revision,header:{...h},items:items.map(i=>({id:i.id,product_id:i.product_id,quantity:String(i.quantity)})),attachments:[...(attachments||[])]};state.dirty=false;renderDraft();}
 function canEditOrder(){const h=state.detail?.header;return h&&capabilities().canOperate&&['draft','returned'].includes(h.status)&&(h.created_by===state.session.workerId||capabilities().canMaster);}
+function refreshPackTotals(formId,draft){
+  const form=$(formId);
+  if(!form||!draft)return;
+  const products=new Map(state.boot.products.map(p=>[p.id,p]));
+  const setText=(el,text)=>{if(el.textContent!==text)el.textContent=text;};
+  let sum=0n,complete=draft.items.length>0,hasProduct=false;
+  const rows=form.querySelectorAll('tr[data-item]');
+  draft.items.forEach((item,index)=>{
+    const pack=products.get(item.product_id)?.pack_size??null;
+    const total=packedQuantity(item.quantity,pack);
+    hasProduct||=Boolean(item.product_id);
+    if(total===null)complete=false;else sum+=total;
+    setText(rows[index].querySelector('[data-pack-size]'),pack===null?(item.product_id?'未設定':'—'):number(pack));
+    setText(rows[index].querySelector('[data-line-total]'),total===null?'—':formatPackedQuantity(total));
+  });
+  setText(form.querySelector('[data-pack-total]'),complete?formatPackedQuantity(sum):hasProduct?'未確定':'—');
+}
 function renderDraft(target='order-body'){const inline=target==='entry-body';if(!inline)orderHeading();const d=inline?state.entryDraft:state.draft,h=d.header;const clients=state.boot.clients.filter(c=>c.active||c.id===h.client_id).map(c=>({...c,label:[c.name,c.store_name].filter(Boolean).join(' ')+(c.active?'':'（無効）')}));$(target).innerHTML=`<form id="${inline?'entry-form':'draft-form'}" novalidate>
   <div class="form-grid"><label>カテゴリ<select aria-label="カテゴリ" name="department" data-header="department">${deptOptions(h.department)}</select></label><div class="choice-field"><label>取引先名<select aria-label="取引先名" name="client_id" data-header="client_id" required>${options(clients,h.client_id)}</select></label>${pickerButton('clients')}</div>
   ${field('出荷希望日','requested_ship_date',h.requested_ship_date,'date','data-header="requested_ship_date" required')}
   ${deliverySelect(d,inline)}
   <label class="full">備考<textarea name="notes" aria-label="備考" data-header="notes" maxlength="4000">${esc(h.notes)}</textarea></label></div>
   <div class="section-heading"><h3>注文明細</h3>${button('add-item','明細追加','plus')}</div>
-  <div class="table-wrap"><table class="draft-table"><thead><tr><th>品名</th><th>数量</th><th></th></tr></thead><tbody>${d.items.map(i=>{const products=state.boot.products.filter(p=>p.department===h.department&&(p.active||p.id===i.product_id)).map(p=>({...p,label:p.name+(p.specification?' / '+p.specification:'')+(p.active?'':'（無効）')}));return `<tr data-item="${i.id}"><td><div class="choice-field"><select data-product="${i.id}" aria-label="品名" required>${options(products,i.product_id)}</select>${pickerButton('products',i.id)}</div></td><td class="quantity-cell"><input class="quantity-input" inputmode="decimal" data-quantity="${i.id}" value="${esc(i.quantity)}" aria-label="数量" required></td><td class="remove"><button type="button" class="icon-button" data-action="remove-item" data-id="${i.id}" title="明細を削除" aria-label="明細を削除">${icon('trash')}</button></td></tr>`;}).join('')}</tbody></table></div>
-  <div class="draft-total"><span>明細数 <strong>${d.items.length}件</strong></span><span>${departments[h.department]}</span></div>
+  <div class="table-wrap"><table class="draft-table"><thead><tr><th>品名</th><th>数量</th><th class="numeric">入数</th><th class="numeric">合計数</th><th></th></tr></thead><tbody>${d.items.map(i=>{const products=state.boot.products.filter(p=>p.department===h.department&&(p.active||p.id===i.product_id)).map(p=>({...p,label:p.name+(p.specification?' / '+p.specification:'')+(p.active?'':'（無効）')}));return `<tr data-item="${i.id}"><td><div class="choice-field"><select data-product="${i.id}" aria-label="品名" required>${options(products,i.product_id)}</select>${pickerButton('products',i.id)}</div></td><td class="quantity-cell"><span class="draft-mobile-label" aria-hidden="true">数量</span><input class="quantity-input" inputmode="decimal" data-quantity="${i.id}" value="${esc(i.quantity)}" aria-label="数量" required></td><td class="numeric pack-cell"><span class="draft-mobile-label">入数</span><span data-pack-size></span></td><td class="numeric pack-cell"><span class="draft-mobile-label">合計数</span><strong data-line-total></strong></td><td class="remove"><button type="button" class="icon-button" data-action="remove-item" data-id="${i.id}" title="明細を削除" aria-label="明細を削除">${icon('trash')}</button></td></tr>`;}).join('')}</tbody></table></div>
+  <div class="draft-total"><span>明細数 <strong>${d.items.length}件</strong></span><span>合計数 <output data-pack-total aria-label="全明細の合計数">—</output></span></div>
   ${attachmentSection(d.attachments,true)}
-  <div class="dialog-actions">${inline?button('clear-entry','クリア','reset','secondary left'):button('close-order','取消','close','secondary left')}<button class="secondary" type="submit" name="intent" value="draft">${icon('save')}下書き保存</button><button class="primary" type="submit" name="intent" value="submit">${icon('send')}承認を依頼</button></div></form>`;}
+  <div class="dialog-actions">${inline?button('clear-entry','クリア','reset','secondary left'):button('close-order','取消','close','secondary left')}<button class="secondary" type="submit" name="intent" value="draft">${icon('save')}下書き保存</button><button class="primary" type="submit" name="intent" value="submit">${icon('send')}承認を依頼</button></div></form>`;
+  refreshPackTotals(inline?'entry-form':'draft-form',d);
+}
 function definition(label,value,full=false){return `<div${full?' class="full"':''}><dt>${esc(label)}</dt><dd>${esc(value||'—')}</dd></div>`;}
 function attachmentSection(attachments=[],editable=false){
   if(!editable&&!attachments.length)return '';
@@ -303,7 +322,7 @@ document.addEventListener('input',event=>{
   if(event.target.closest('#action-dialog'))state.actionDirty=true;
   const ctx=draftContext(event.target);
   if(event.target.dataset.header&&ctx.draft){const name=event.target.dataset.header;if(!['department','client_id','delivery_id'].includes(name))ctx.draft.header[name]=event.target.value;ctx.markDirty();}
-  if(event.target.dataset.quantity&&ctx.draft){const row=ctx.draft.items.find(i=>i.id===event.target.dataset.quantity);if(row)row.quantity=event.target.value;ctx.markDirty();}
+  if(event.target.dataset.quantity&&ctx.draft){const row=ctx.draft.items.find(i=>i.id===event.target.dataset.quantity);if(row)row.quantity=event.target.value;ctx.markDirty();refreshPackTotals(ctx.inline?'entry-form':'draft-form',ctx.draft);}
   const progress=event.target.closest('[data-progress]');if(progress){state.progressDrafts.set(progress.dataset.progress,{status:progress.elements.status.value,note:progress.elements.note.value});state.dirty=true;}
 });
 document.addEventListener('change',async event=>{
