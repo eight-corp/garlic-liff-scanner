@@ -8,6 +8,7 @@ const badge=status=>`<span class="badge ${esc(status)}">${esc(statuses[status]||
 const button=(action,text,svg='edit',kind='secondary',extra='')=>`<button type="button" class="${kind}" data-action="${action}" ${extra}>${icon(svg)}${esc(text)}</button>`;
 const options=(values,value,empty='選択してください')=>`<option value="">${esc(empty)}</option>`+values.map(v=>`<option value="${esc(v.id)}" ${v.id===value?'selected':''}>${esc(v.label??v.name)}</option>`).join('');
 const deptOptions=value=>Object.entries(departments).map(([id,name])=>`<option value="${id}" ${id===value?'selected':''}>${name}</option>`).join('');
+const orderCategories=order=>Object.entries(departments).filter(([key])=>(order.departments||[order.department]).includes(key)).map(([,label])=>label).join('、');
 const field=(label,name,value='',type='text',extra='')=>`<label>${esc(label)}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;
 const entryMasterLabels={clients:'取引先',deliveries:'納品先',products:'商品'};
 const pickerButton=(kind,itemId='',disabled=false)=>`<button type="button" class="icon-button choice-search" data-action="open-entry-picker" data-kind="${kind}" data-id="${esc(itemId)}" title="${entryMasterLabels[kind]}を検索・追加" aria-label="${entryMasterLabels[kind]}を検索・追加" ${disabled?'disabled':''}>${icon('search')}</button>`;
@@ -58,7 +59,7 @@ function listRows(columns,progress){
     const no=orderNumber(o.order_no);
     const cells={
       order_no:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${no}を開く">${no}</button>`,
-      department:departments[o.department],client_name:esc(o.client_name),delivery_name:esc(o.delivery_name),
+      department:esc(orderCategories(o)),client_name:esc(o.client_name),delivery_name:esc(o.delivery_name),
       ordered_on:date(o.ordered_on),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
       shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
       updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
@@ -158,8 +159,9 @@ function changeColumnFilter(menu,filter,typing=false){
 async function loadList(){if(state.view==='input'){state.load++;$('view').removeAttribute('aria-busy');if(!$('entry-form')||!capabilities().canOperate)renderInput();return;}if(state.view==='master'){renderMaster();return;}const token=++state.load;const filters=listFilters();$('view').setAttribute('aria-busy','true');try{const result=await rpc('orders_list',{p_filters:filters});if(token!==state.load)return;state.list=result;renderList();}catch(error){if(token===state.load)notice(error.message,true);}finally{if(token===state.load)$('view').removeAttribute('aria-busy');}}
 function activateView(view){if(!state.boot||state.entrySaving)return;if($('progress-column-menu').matches(':popover-open'))$('progress-column-menu').hidePopover();clearTimeout(columnRefresh);state.view=view;document.querySelectorAll('[data-view]').forEach(el=>{el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});return loadList();}
 
-function orderHeading(){const h=state.detail?.header;$('order-title').textContent=state.draft?(h?orderNumber(h.order_no)+' の変更':'注文を追加'):orderNumber(h.order_no);$('order-subtitle').textContent=state.draft?'':departments[h.department]+' / '+statuses[h.progress];$('order-error').hidden=true;document.querySelector('[data-action="detail-refresh"]').hidden=!!state.draft;}
-function newDraft(){return {id:crypto.randomUUID(),revision:0,header:{department:'dry',client_id:'',delivery_id:'',delivery_name:'',delivery_address:'',delivery_phone:'',requested_ship_date:today(),notes:''},items:[{id:crypto.randomUUID(),product_id:'',quantity:'1'}],attachments:[]};}
+function orderHeading(){const h=state.detail?.header;$('order-title').textContent=state.draft?(h?orderNumber(h.order_no)+' の変更':'注文を追加'):orderNumber(h.order_no);$('order-subtitle').textContent=state.draft?'':statuses[h.progress];$('order-error').hidden=true;document.querySelector('[data-action="detail-refresh"]').hidden=!!state.draft;}
+function newDraftItem(department='dry'){return {id:crypto.randomUUID(),department,product_id:'',quantity:'1'};}
+function newDraft(){return {id:crypto.randomUUID(),revision:0,header:{client_id:'',delivery_id:'',delivery_name:'',delivery_address:'',delivery_phone:'',requested_ship_date:today(),notes:''},items:[newDraftItem()],attachments:[]};}
 function setDelivery(header,delivery){header.delivery_id=delivery?.id||'';header.delivery_name=delivery?.name||'';header.delivery_address=[delivery?.postal_code,delivery?.address].filter(Boolean).join(' ');header.delivery_phone=delivery?.phone||'';}
 function deliverySelect(draft,inline){
   const h=draft.header,client=state.boot.clients.find(c=>c.id===h.client_id),saved=inline?null:state.detail?.header;
@@ -181,7 +183,7 @@ function draftContext(element){
   return {inline,draft:inline?state.entryDraft:state.draft,target:inline?'entry-body':'order-body',error:inline?'entry-error':'order-error',markDirty(){if(inline)state.entryDirty=true;else state.dirty=true;}};
 }
 async function openOrder(id){await busy($('view'),async()=>{const data=await rpc('orders_detail',{p_order_id:id});state.detail=data;state.draft=null;state.dirty=false;state.detailNotice='';state.progressDrafts.clear();renderDetail();if(!$('order-dialog').open)$('order-dialog').showModal();});}
-function editOrder(){const {header:h,items,attachments}=state.detail;if(!canEditOrder())return;state.draft={id:h.id,revision:h.revision,header:{...h},items:items.map(i=>({id:i.id,product_id:i.product_id,quantity:String(i.quantity)})),attachments:[...(attachments||[])]};state.dirty=false;renderDraft();}
+function editOrder(){const {header:h,items,attachments}=state.detail;if(!canEditOrder())return;const {department,departments:categoryIds,...header}=h;state.draft={id:h.id,revision:h.revision,header,items:items.map(i=>({id:i.id,department:i.department||department,product_id:i.product_id,quantity:String(i.quantity)})),attachments:[...(attachments||[])]};state.dirty=false;renderDraft();}
 function canEditOrder(){const h=state.detail?.header;return h&&capabilities().canOperate&&['draft','returned'].includes(h.status)&&(h.created_by===state.session.workerId||capabilities().canMaster);}
 function refreshPackTotals(formId,draft){
   const form=$(formId);
@@ -200,13 +202,25 @@ function refreshPackTotals(formId,draft){
   });
   setText(form.querySelector('[data-pack-total]'),complete?formatPackedQuantity(sum):hasProduct?'未確定':'—');
 }
+function draftItemRow(item){
+  const products=state.boot.products.filter(p=>p.department===item.department&&(p.active||p.id===item.product_id))
+    .map(p=>({id:p.id,label:p.name+(p.specification?' / '+p.specification:'')+(p.active?'':'（無効）')}));
+  return `<tr data-item="${item.id}">
+    <td class="draft-category"><span class="draft-mobile-label" aria-hidden="true">カテゴリ</span><select data-item-department="${item.id}" aria-label="カテゴリ">${deptOptions(item.department)}</select></td>
+    <td class="draft-product"><span class="draft-mobile-label" aria-hidden="true">品名</span><div class="choice-field"><select data-product="${item.id}" aria-label="品名" required>${options(products,item.product_id)}</select>${pickerButton('products',item.id)}</div></td>
+    <td class="quantity-cell"><span class="draft-mobile-label" aria-hidden="true">数量</span><input class="quantity-input" inputmode="decimal" data-quantity="${item.id}" value="${esc(item.quantity)}" aria-label="数量" required></td>
+    <td class="numeric pack-cell"><span class="draft-mobile-label">入数</span><span data-pack-size></span></td>
+    <td class="numeric pack-cell"><span class="draft-mobile-label">合計数</span><strong data-line-total></strong></td>
+    <td class="remove"><button type="button" class="icon-button" data-action="remove-item" data-id="${item.id}" title="明細を削除" aria-label="明細を削除">${icon('trash')}</button></td>
+  </tr>`;
+}
 function renderDraft(target='order-body'){const inline=target==='entry-body';if(!inline)orderHeading();const d=inline?state.entryDraft:state.draft,h=d.header;const clients=state.boot.clients.filter(c=>c.active||c.id===h.client_id).map(c=>({...c,label:[c.name,c.store_name].filter(Boolean).join(' ')+(c.active?'':'（無効）')}));$(target).innerHTML=`<form id="${inline?'entry-form':'draft-form'}" novalidate>
-  <div class="form-grid"><label>カテゴリ<select aria-label="カテゴリ" name="department" data-header="department">${deptOptions(h.department)}</select></label><div class="choice-field"><label>取引先名<select aria-label="取引先名" name="client_id" data-header="client_id" required>${options(clients,h.client_id)}</select></label>${pickerButton('clients')}</div>
+  <div class="form-grid"><div class="choice-field"><label>取引先名<select aria-label="取引先名" name="client_id" data-header="client_id" required>${options(clients,h.client_id)}</select></label>${pickerButton('clients')}</div>
   ${field('出荷希望日','requested_ship_date',h.requested_ship_date,'date','data-header="requested_ship_date" required')}
   ${deliverySelect(d,inline)}
   <label class="full">備考<textarea name="notes" aria-label="備考" data-header="notes" maxlength="4000">${esc(h.notes)}</textarea></label></div>
   <div class="section-heading"><h3>注文明細</h3>${button('add-item','明細追加','plus')}</div>
-  <div class="table-wrap"><table class="draft-table"><thead><tr><th>品名</th><th>数量</th><th class="numeric">入数</th><th class="numeric">合計数</th><th></th></tr></thead><tbody>${d.items.map(i=>{const products=state.boot.products.filter(p=>p.department===h.department&&(p.active||p.id===i.product_id)).map(p=>({...p,label:p.name+(p.specification?' / '+p.specification:'')+(p.active?'':'（無効）')}));return `<tr data-item="${i.id}"><td><div class="choice-field"><select data-product="${i.id}" aria-label="品名" required>${options(products,i.product_id)}</select>${pickerButton('products',i.id)}</div></td><td class="quantity-cell"><span class="draft-mobile-label" aria-hidden="true">数量</span><input class="quantity-input" inputmode="decimal" data-quantity="${i.id}" value="${esc(i.quantity)}" aria-label="数量" required></td><td class="numeric pack-cell"><span class="draft-mobile-label">入数</span><span data-pack-size></span></td><td class="numeric pack-cell"><span class="draft-mobile-label">合計数</span><strong data-line-total></strong></td><td class="remove"><button type="button" class="icon-button" data-action="remove-item" data-id="${i.id}" title="明細を削除" aria-label="明細を削除">${icon('trash')}</button></td></tr>`;}).join('')}</tbody></table></div>
+  <div class="table-wrap"><table class="draft-table"><thead><tr><th>カテゴリ</th><th>品名</th><th>数量</th><th class="numeric">入数</th><th class="numeric">合計数</th><th></th></tr></thead><tbody>${d.items.map(draftItemRow).join('')}</tbody></table></div>
   <div class="draft-total"><span>明細数 <strong>${d.items.length}件</strong></span><span>合計数 <output data-pack-total aria-label="全明細の合計数">—</output></span></div>
   ${attachmentSection(d.attachments,true)}
   <div class="dialog-actions">${inline?button('clear-entry','クリア','reset','secondary left'):button('close-order','取消','close','secondary left')}<button class="secondary" type="submit" name="intent" value="draft">${icon('save')}下書き保存</button><button class="primary" type="submit" name="intent" value="submit">${icon('send')}承認を依頼</button></div></form>`;
@@ -255,9 +269,9 @@ function renderDetail(){state.draft=null;orderHeading();const {header:h,items,sh
   ${state.detailNotice?`<div class="saved-notice" role="status">${esc(state.detailNotice)}</div>`:''}
   <div class="row">${badge(h.progress)}${canEditOrder()?button('edit-order','注文を変更','edit'):''}${capabilities().canApprove&&h.status==='pending'?button('approve-order','注文を確定','approve','primary')+button('return-order','差戻し','reset'):''}${capabilities().canApprove&&h.status!=='cancelled'&&!shipped?button('cancel-order','注文取消','close','danger'):''}</div>
   ${h.return_reason?`<div class="error">差戻し理由：${esc(h.return_reason)}</div>`:''}
-  <dl class="definition-grid">${definition('カテゴリ',departments[h.department])}${definition('取引先名',h.client_name)}${definition('登録担当者',h.creator_name)}${definition('注文日',date(h.ordered_on))}${definition('出荷希望日',date(h.requested_ship_date))}${definition('納品先名',h.delivery_name)}${h.planned_carrier_name?definition('配送業者',h.planned_carrier_name):''}${definition('備考',h.notes,true)}</dl>
+  <dl class="definition-grid">${definition('取引先名',h.client_name)}${definition('登録担当者',h.creator_name)}${definition('注文日',date(h.ordered_on))}${definition('出荷希望日',date(h.requested_ship_date))}${definition('納品先名',h.delivery_name)}${h.planned_carrier_name?definition('配送業者',h.planned_carrier_name):''}${definition('備考',h.notes,true)}</dl>
   <div class="section-heading"><h3>注文明細</h3>${canWork&&items.some(i=>i.work_status==='ready'&&remaining(i)>0)?button('ship-order','出荷を登録','truck','primary'):''}</div>
-  <div class="table-wrap"><table class="detail-table"><thead><tr><th>商品・規格</th><th>注文数量</th><th>出荷済</th><th>未出荷</th><th>進捗</th></tr></thead><tbody>${items.map(i=>{const rem=remaining(i),pending=state.progressDrafts.get(i.id);return `<tr><td><strong>${esc(i.product_name)}</strong><small>${esc(i.product_code)} ${esc(i.specification)}</small></td><td class="numeric item-quantities">${number(i.quantity)} ${esc(i.unit)}</td><td class="numeric item-quantities">${number(i.shipped_quantity)} ${esc(i.unit)}<div class="meter"><span style="width:${Math.min(100,Number(i.shipped_quantity)/Number(i.quantity)*100)}%"></span></div></td><td class="numeric item-quantities">${number(rem)} ${esc(i.unit)}</td><td class="progress-cell">${rem===0?badge('shipped'):canWork?`<form data-progress="${i.id}"><select name="status" aria-label="${esc(i.product_name)}の進捗">${Object.entries(workStatuses).map(([id,label])=>`<option value="${id}" ${id===(pending?.status||i.work_status)?'selected':''}>${label}</option>`).join('')}</select><div class="row"><input name="note" value="${esc(pending?.note??i.work_note)}" aria-label="${esc(i.product_name)}の作業メモ" maxlength="2000"><button class="icon-button" type="submit" title="進捗を保存" aria-label="${esc(i.product_name)}の進捗を保存">${icon('save')}</button></div></form>`:badge(i.work_status)}${!canWork&&i.work_note?`<small>${esc(i.work_note)}</small>`:''}</td></tr>`;}).join('')}</tbody></table></div>
+  <div class="table-wrap"><table class="detail-table"><thead><tr><th>商品・規格</th><th>注文数量</th><th>出荷済</th><th>未出荷</th><th>進捗</th></tr></thead><tbody>${items.map(i=>{const rem=remaining(i),pending=state.progressDrafts.get(i.id);return `<tr><td><strong>${esc(i.product_name)}</strong><small>${esc([departments[i.department||h.department],i.product_code,i.specification].filter(Boolean).join(' / '))}</small></td><td class="numeric item-quantities">${number(i.quantity)} ${esc(i.unit)}</td><td class="numeric item-quantities">${number(i.shipped_quantity)} ${esc(i.unit)}<div class="meter"><span style="width:${Math.min(100,Number(i.shipped_quantity)/Number(i.quantity)*100)}%"></span></div></td><td class="numeric item-quantities">${number(rem)} ${esc(i.unit)}</td><td class="progress-cell">${rem===0?badge('shipped'):canWork?`<form data-progress="${i.id}"><select name="status" aria-label="${esc(i.product_name)}の進捗">${Object.entries(workStatuses).map(([id,label])=>`<option value="${id}" ${id===(pending?.status||i.work_status)?'selected':''}>${label}</option>`).join('')}</select><div class="row"><input name="note" value="${esc(pending?.note??i.work_note)}" aria-label="${esc(i.product_name)}の作業メモ" maxlength="2000"><button class="icon-button" type="submit" title="進捗を保存" aria-label="${esc(i.product_name)}の進捗を保存">${icon('save')}</button></div></form>`:badge(i.work_status)}${!canWork&&i.work_note?`<small>${esc(i.work_note)}</small>`:''}</td></tr>`;}).join('')}</tbody></table></div>
   ${attachmentSection(state.detail.attachments)}
   <div class="section-heading"><h3>出荷履歴</h3><span class="muted">${shipments.filter(s=>!s.voided_at).length}件</span></div>${shipments.length?shipments.map(s=>`<div class="shipment-entry ${s.voided_at?'voided':''}"><div class="row"><strong>${date(s.shipped_on)}　${esc(s.carrier_name||'配送業者未設定')}</strong>${s.voided_at?badge('cancelled'):capabilities().canApprove?button('void-shipment','出荷取消','reset','secondary',`data-id="${s.id}"`):''}</div><p>${(s.items||[]).map(i=>`${esc(i.product_name)} ${number(i.quantity)}${esc(i.unit)}`).join(' / ')}</p><p>伝票番号：${esc(s.tracking_no||'—')}　${esc(s.worker_name||'')}</p>${s.notes?`<p class="note">${esc(s.notes)}</p>`:''}${s.voided_at?`<p>取消理由：${esc(s.void_reason)}</p>`:''}</div>`).join(''):'<div class="empty">出荷記録はありません</div>'}
   <div class="section-heading"><h3>変更履歴</h3></div><ol class="events">${events.map(e=>`<li><span>${time(e.created_at)}</span><span>${esc(e.worker_name||e.actor_id)}</span><span>${esc(eventNames[e.kind]||e.kind)}${e.detail?.status?'：'+esc(workStatuses[e.detail.status]||e.detail.status):''}${e.detail?.reason?' / '+esc(e.detail.reason):''}${e.detail?.note?' / '+esc(e.detail.note):''}</span></li>`).join('')}</ol>`;}
@@ -266,17 +280,19 @@ function actionDialog(title,body){$('action-title').textContent=title;$('action-
 function carrierSelect(id){return `<label>配送業者<select aria-label="配送業者" name="carrier_id">${options(state.boot.carriers.filter(c=>c.active),id,'未設定')}</select></label>`;}
 function clientCarrier(){return state.boot.clients.find(c=>c.id===state.detail.header.client_id)?.default_carrier_id||'';}
 function decisionDialog(action){const title={approve:'注文を確定',return:'注文を差戻し',cancel:'注文を取消'}[action];actionDialog(title,`<form id="decision-form" data-decision="${action}" novalidate><p>${orderNumber(state.detail.header.order_no)}　${esc(state.detail.header.client_name)}</p>${action==='approve'?`<div class="approval-carrier">${carrierSelect(clientCarrier())}${button('toggle-new-carrier','配送業者を追加','plus','secondary','aria-expanded="false" aria-controls="new-carrier"')}</div><div id="new-carrier" hidden>${field('新しい配送業者名','new_carrier_name','','text','disabled maxlength="160"')}</div>`:`<label>理由<textarea name="reason" maxlength="2000" required></textarea></label>`}<div class="dialog-actions">${button('close-action','戻る','left')}<button class="${action==='cancel'?'danger':'primary'}" type="submit">${icon(action==='approve'?'approve':'send')}${title}</button></div></form>`);}
-function shipmentDialog(){const items=state.detail.items.filter(i=>i.work_status==='ready'&&remaining(i)>0);if(!items.length)return;actionDialog('出荷を登録',`<form id="shipment-form" data-shipment="${crypto.randomUUID()}" novalidate><div class="form-grid">${field('出荷日','shipped_on',today(),'date','required')}${carrierSelect(state.detail.header.planned_carrier_id||clientCarrier())}${field('伝票番号','tracking_no','','text','maxlength="120"')}<label class="full">備考<textarea name="notes" maxlength="2000"></textarea></label></div><div class="section-heading"><h3>出荷明細</h3></div><div class="table-wrap"><table class="ship-table"><thead><tr><th></th><th>商品</th><th>残数</th><th>今回出荷</th></tr></thead><tbody>${items.map(i=>`<tr data-ship-item="${i.id}"><td><input type="checkbox" name="include" aria-label="${esc(i.product_name)}を出荷" checked></td><td>${esc(i.product_name)}<small>${esc(i.specification)}</small></td><td class="numeric">${number(remaining(i))} ${esc(i.unit)}</td><td><input class="quantity-input" name="quantity" aria-label="${esc(i.product_name)}の出荷数量" inputmode="decimal" value="${remaining(i)}"></td></tr>`).join('')}</tbody></table></div><div class="dialog-actions">${button('close-action','戻る','left')}<button type="submit" class="primary">${icon('truck')}出荷を登録</button></div></form>`);}
+function shipmentDialog(){const items=state.detail.items.filter(i=>i.work_status==='ready'&&remaining(i)>0);if(!items.length)return;actionDialog('出荷を登録',`<form id="shipment-form" data-shipment="${crypto.randomUUID()}" novalidate><div class="form-grid">${field('出荷日','shipped_on',today(),'date','required')}${carrierSelect(state.detail.header.planned_carrier_id||clientCarrier())}${field('伝票番号','tracking_no','','text','maxlength="120"')}<label class="full">備考<textarea name="notes" maxlength="2000"></textarea></label></div><div class="section-heading"><h3>出荷明細</h3></div><div class="table-wrap"><table class="ship-table"><thead><tr><th></th><th>商品</th><th>残数</th><th>今回出荷</th></tr></thead><tbody>${items.map(i=>`<tr data-ship-item="${i.id}"><td><input type="checkbox" name="include" aria-label="${esc(i.product_name)}を出荷" checked></td><td>${esc(i.product_name)}<small>${esc([departments[i.department||state.detail.header.department],i.specification].filter(Boolean).join(' / '))}</small></td><td class="numeric">${number(remaining(i))} ${esc(i.unit)}</td><td><input class="quantity-input" name="quantity" aria-label="${esc(i.product_name)}の出荷数量" inputmode="decimal" value="${remaining(i)}"></td></tr>`).join('')}</tbody></table></div><div class="dialog-actions">${button('close-action','戻る','left')}<button type="submit" class="primary">${icon('truck')}出荷を登録</button></div></form>`);}
 function voidDialog(id){actionDialog('出荷記録を取消',`<form id="void-form" data-shipment="${id}" novalidate><label>取消理由<textarea name="reason" maxlength="2000" required></textarea></label><div class="dialog-actions">${button('close-action','戻る','left')}<button class="danger" type="submit">${icon('reset')}出荷取消</button></div></form>`);}
 function closeAction(){if($('action-dialog').getAttribute('aria-busy')==='true'||(state.actionDirty&&!confirm('入力中の内容を破棄して閉じますか？')))return;state.actionDirty=false;entryPicker=null;$('action-dialog').close();}
 function closeOrder(){if($('order-dialog').getAttribute('aria-busy')==='true'||(state.dirty&&!confirm('未保存の内容を破棄して閉じますか？')))return;state.dirty=false;state.progressDrafts.clear();$('order-dialog').close();}
 
 const masterNames={products:'商品一覧',clients:'取引先一覧',carriers:'配送業者一覧'};
-function pickerChoices({kind,ctx}){
+const pickerItem=({ctx,itemId})=>ctx.draft.items.find(item=>item.id===itemId);
+function pickerChoices({kind,ctx,itemId}){
   const h=ctx.draft.header;
   if(kind==='clients')return state.boot.clients.filter(c=>c.active).map(c=>({...c,label:[c.name,c.store_name].filter(Boolean).join(' '),meta:c.code.startsWith('C-')&&c.code.length===38?'':c.code}));
   if(kind==='deliveries')return (state.boot.clients.find(c=>c.id===h.client_id)?.deliveries||[]).filter(d=>d.active).map(d=>({...d,label:d.name}));
-  return state.boot.products.filter(p=>p.active&&p.department===h.department).map(p=>({...p,label:p.name,meta:[p.specification,p.code].filter(Boolean).join(' / ')}));
+  const department=pickerItem({ctx,itemId})?.department;
+  return state.boot.products.filter(p=>p.active&&p.department===department).map(p=>({...p,label:p.name,meta:[p.specification,p.code].filter(Boolean).join(' / ')}));
 }
 function renderPickerResults(){
   const matches=pickerChoices(entryPicker).filter(choice=>matchesOrderChoice(entryPicker.query,[choice.label,choice.meta]));
@@ -303,10 +319,10 @@ function selectEntryMaster(id){
   $(ctx.target).querySelector(`[data-action="open-entry-picker"][data-kind="${kind}"][data-id="${CSS.escape(itemId)}"]`)?.focus();
 }
 function entryMasterDialog(){
-  const {kind,query,ctx}=entryPicker,label=entryMasterLabels[kind];
+  const {kind,query}=entryPicker,label=entryMasterLabels[kind];
   const name=query.trim();
   const jan=/^[0-9]+$/.test(name.normalize('NFKC'))?name.normalize('NFKC').slice(0,40):'';
-  const fields=kind==='products'?productFields({department:ctx.draft.header.department,name:jan?'':name,code:jan},true)
+  const fields=kind==='products'?productFields({department:pickerItem(entryPicker).department,name:jan?'':name,code:jan},true)
     :field(kind==='clients'?'取引先名':'納品先名','name',name,'text','required maxlength="160"');
   actionDialog(label+'を新規追加',`<form id="entry-master-form" data-kind="${kind}" data-id="${crypto.randomUUID()}"><div class="form-grid">${fields}</div><div class="dialog-actions">${button('back-entry-picker','検索に戻る','left','secondary left')}<button class="primary" type="submit">${icon('save')}追加して選択</button></div></form>`);
   updateJanWarning($('entry-master-form'));
@@ -395,7 +411,7 @@ document.addEventListener('click',async event=>{
   if(action==='choose-entry-master'){try{selectEntryMaster(control.dataset.id);}catch(error){showError('action-error',error);}return;}
   if(action==='add-entry-master'){entryMasterDialog();return;}
   if(action==='back-entry-picker'){if(!state.actionDirty||confirm('入力中の内容を破棄しますか？'))renderEntryPicker();return;}
-  if(action==='add-item'){const ctx=draftContext(control);if(ctx.draft.items.length>=100){showError(ctx.error,new Error('明細は100行までです。'));return;}ctx.draft.items.push({id:crypto.randomUUID(),product_id:'',quantity:'1'});ctx.markDirty();renderDraft(ctx.target);return;}
+  if(action==='add-item'){const ctx=draftContext(control);if(ctx.draft.items.length>=100){showError(ctx.error,new Error('明細は100行までです。'));return;}ctx.draft.items.push(newDraftItem(ctx.draft.items.at(-1)?.department));ctx.markDirty();renderDraft(ctx.target);return;}
   if(action==='remove-item'){const ctx=draftContext(control);ctx.draft.items=ctx.draft.items.filter(i=>i.id!==control.dataset.id);ctx.markDirty();renderDraft(ctx.target);return;}
   if(action==='attach-images'){control.closest('form').querySelector('[data-attachment-files]').click();return;}
   if(action==='close-image'){$('image-dialog').close();return;}
@@ -447,7 +463,7 @@ document.addEventListener('input',event=>{
   }
   if(event.target.closest('#action-dialog'))state.actionDirty=true;
   const ctx=draftContext(event.target);
-  if(event.target.dataset.header&&ctx.draft){const name=event.target.dataset.header;if(!['department','client_id','delivery_id'].includes(name))ctx.draft.header[name]=event.target.value;ctx.markDirty();}
+  if(event.target.dataset.header&&ctx.draft){const name=event.target.dataset.header;if(!['client_id','delivery_id'].includes(name))ctx.draft.header[name]=event.target.value;ctx.markDirty();}
   if(event.target.dataset.quantity&&ctx.draft){const row=ctx.draft.items.find(i=>i.id===event.target.dataset.quantity);if(row)row.quantity=event.target.value;ctx.markDirty();refreshPackTotals(ctx.inline?'entry-form':'draft-form',ctx.draft);}
   const progress=event.target.closest('[data-progress]');if(progress){state.progressDrafts.set(progress.dataset.progress,{status:progress.elements.status.value,note:progress.elements.note.value});state.dirty=true;}
 });
@@ -479,7 +495,14 @@ document.addEventListener('change',async event=>{
     },ctx.error);}finally{if(ctx.inline)state.entrySaving=false;}
     return;
   }
-  if(target.dataset.header==='department'&&draft){if(draft.items.some(i=>i.product_id)&&!confirm('カテゴリを変更し、商品明細をリセットしますか？')){target.value=draft.header.department;return;}draft.header.department=target.value;draft.items=[{id:crypto.randomUUID(),product_id:'',quantity:'1'}];ctx.markDirty();renderDraft(ctx.target);}
+  if(target.dataset.itemDepartment&&draft){
+    const item=draft.items.find(i=>i.id===target.dataset.itemDepartment);
+    if(!item||item.department===target.value)return;
+    if(item.product_id&&!confirm('カテゴリを変更し、この明細の品名をクリアしますか？')){target.value=item.department;return;}
+    item.department=target.value;item.product_id='';ctx.markDirty();renderDraft(ctx.target);
+    $(ctx.target).querySelector(`[data-item-department="${CSS.escape(item.id)}"]`)?.focus();
+    return;
+  }
   if(target.dataset.header==='client_id'&&draft){const client=state.boot.clients.find(c=>c.id===target.value);draft.header.client_id=target.value;const deliveries=(client?.deliveries||[]).filter(d=>d.active);setDelivery(draft.header,deliveries[0]);ctx.markDirty();renderDraft(ctx.target);}
   if(target.dataset.header==='delivery_id'&&draft){if(target.value==='__saved__'){const saved=state.detail.header;for(const key of ['delivery_id','delivery_name','delivery_address','delivery_phone'])draft.header[key]=saved[key]||'';}else{const client=state.boot.clients.find(c=>c.id===draft.header.client_id);setDelivery(draft.header,client?.deliveries?.find(d=>d.id===target.value&&d.active));}ctx.markDirty();renderDraft(ctx.target);}
   if(target.dataset.product&&draft){draft.items.find(i=>i.id===target.dataset.product).product_id=target.value;ctx.markDirty();renderDraft(ctx.target);}
@@ -492,7 +515,7 @@ document.addEventListener('submit',async event=>{
     if(kind==='clients')data.code='C-'+form.dataset.id;
     if(kind==='deliveries')data.client_id=ctx.draft.header.client_id;
     if(kind==='products'){
-      data.department=ctx.draft.header.department;
+      data.department=pickerItem(entryPicker).department;
       for(const key of ['pack_size','case_pack_size','band_box_count'])data[key]=data[key].normalize('NFKC').trim();
     }
     await busy($('action-dialog'),async()=>{

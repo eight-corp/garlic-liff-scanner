@@ -54,7 +54,8 @@ try {
       assert.equal(await entry.getByLabel('数量',{exact:true}).evaluate(el=>getComputedStyle(el).fontSize),'17px');
       assert.equal(await entry.getByLabel('出荷希望日',{exact:true}).inputValue(),databaseDay);
       assert.equal(await entry.locator('[name=ordered_on], [name=carrier_id]').count(),0);
-      assert.deepEqual(await entry.locator('.draft-table th').allTextContents(),['品名','数量','入数','合計数','']);
+      assert.deepEqual(await entry.locator('.draft-table th').allTextContents(),['カテゴリ','品名','数量','入数','合計数','']);
+      assert.equal(await entry.locator('.form-grid').getByLabel('カテゴリ',{exact:true}).count(),0);
       assert.equal(await entry.locator('[data-pack-total]').innerText(),'—');
       await entry.getByRole('button',{name:'下書き保存',exact:true}).click();
       await sales.locator('#entry-error').filter({hasText:'取引先名・納品先名・出荷希望日を入力'}).waitFor();
@@ -142,7 +143,7 @@ try {
       assert.doesNotMatch(await entry.innerText(),/先方注文番号/);
       await entry.getByLabel('品名',{exact:true}).selectOption(s.product.id);
       assert.equal(await entry.getByLabel('品名',{exact:true}).locator('option').filter({hasText:'黒にんにく'}).count(),0);
-      sales.once('dialog',async dialog=>{assert.equal(dialog.message(),'カテゴリを変更し、商品明細をリセットしますか？');await dialog.dismiss();});
+      sales.once('dialog',async dialog=>{assert.equal(dialog.message(),'カテゴリを変更し、この明細の品名をクリアしますか？');await dialog.dismiss();});
       await entry.getByLabel('カテゴリ',{exact:true}).selectOption('black');
       assert.equal(await entry.getByLabel('カテゴリ',{exact:true}).inputValue(),'dry');
       assert.equal(await entry.getByLabel('品名',{exact:true}).inputValue(),s.product.id);
@@ -167,7 +168,8 @@ try {
       assert.equal((await rpc('sales','orders_list')).total,0);
       await entry.getByRole('button',{name:'承認を依頼',exact:true}).click();
       await order.getByRole('status').filter({hasText:'承認を依頼しました。'}).waitFor();
-      assert.equal(await order.locator('dt').filter({hasText:'カテゴリ'}).count(),1);
+      assert.equal(await order.locator('dt').filter({hasText:'カテゴリ'}).count(),0);
+      assert.match(await order.locator('.detail-table tbody td').first().innerText(),/乾燥にんにく/);
       assert.doesNotMatch(await order.innerText(),/部署/);
       assert.equal(await order.getByRole('button',{name:'注文を確定',exact:true}).count(),0);
       assert.equal(await order.locator('img').count(),0,'Customer text is never interpreted as markup');
@@ -352,13 +354,20 @@ try {
       await officeEntry.getByLabel('取引先名',{exact:true}).selectOption(s.client.id);
       await officeEntry.getByLabel('品名',{exact:true}).selectOption(s.product.id);
       await officeEntry.getByRole('button',{name:'明細追加',exact:true}).click();
-      await officeEntry.getByLabel('品名',{exact:true}).nth(1).selectOption(quickProduct.id);
       await officeEntry.getByLabel('数量',{exact:true}).nth(1).fill('15');
+      await officeEntry.getByLabel('カテゴリ',{exact:true}).nth(1).selectOption('black');
+      assert.equal(await officeEntry.getByLabel('品名',{exact:true}).first().inputValue(),s.product.id);
+      assert.equal(await officeEntry.getByLabel('数量',{exact:true}).nth(1).inputValue(),'15');
+      assert.equal(await officeEntry.getByLabel('品名',{exact:true}).nth(1).locator('option').filter({hasText:'乾燥にんにく'}).count(),0);
+      await officeEntry.getByRole('button',{name:'商品を検索・追加',exact:true}).nth(1).click();
+      await approval.getByRole('searchbox').fill('黒にんにく');
+      await approval.locator('.choice-results button').getByText('黒にんにく',{exact:true}).click();
+      assert.equal(await officeEntry.getByLabel('品名',{exact:true}).nth(1).inputValue(),s.black.id);
       const sample=await office.evaluate(()=>{
         const canvas=document.createElement('canvas');canvas.width=560;canvas.height=780;
         const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,560,780);
         ctx.fillStyle='#263335';ctx.font='30px sans-serif';ctx.fillText('注文FAX（テスト画像）',28,64);
-        ctx.font='20px sans-serif';ctx.fillText('乾燥にんにく 1袋',28,135);ctx.fillText('新規大袋 15個',28,175);
+        ctx.font='20px sans-serif';ctx.fillText('乾燥にんにく 1袋',28,135);ctx.fillText('黒にんにく 15箱',28,175);
         ctx.strokeStyle='#596e71';ctx.strokeRect(22,105,514,85);
         return canvas.toDataURL('image/png').split(',')[1];
       });
@@ -374,6 +383,7 @@ try {
       const officeRecords=(await rpc('office','orders_list')).rows;
       assert.equal(officeRecords[0].created_by,'office');
       assert.equal(officeRecords[0].item_count,2);
+      assert.deepEqual(officeRecords[0].departments,['dry','black']);
       await officeOrder.getByRole('button',{name:photoButton,exact:true}).click();
       const photoDialog=office.getByRole('dialog',{name:'保存した注文画像'});
       const photo=photoDialog.getByRole('img',{name:testPhoto.name,exact:true});
@@ -418,6 +428,12 @@ try {
       await office.getByRole('button',{name:'絞り込み解除',exact:true}).click();
       await office.waitForFunction(()=>document.querySelectorAll('.list-table tbody tr[data-order]').length===3);
       assert.deepEqual(await badges.allTextContents(),['承認待ち','下書き','出荷済み']);
+      assert.equal(await office.locator('.list-table tbody tr').first().locator('td').nth(2).innerText(),'乾燥にんにく、黒にんにく');
+      await office.getByRole('button',{name:'カテゴリを絞り込む',exact:true}).click();
+      await menu.getByRole('searchbox').fill('黒にんにく');
+      await office.waitForFunction(()=>document.querySelectorAll('.list-table tbody tr[data-order]').length===1);
+      assert.deepEqual(await badges.allTextContents(),['承認待ち']);
+      await menu.getByRole('searchbox').press('Escape');
       assert.equal((await rpc('admin','orders_bootstrap')).canApprove,false,'Master admin does not inherit approval');
       if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-master-${width}.png`)});
       for(const page of [sales,admin])assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Only tables, not the whole page, scroll horizontally');

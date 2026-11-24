@@ -64,6 +64,8 @@ create table if not exists public.orders_orders (
   revision integer not null default 1, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   check(length(delivery_name) between 1 and 160), check(length(notes)<=4000)
 );
+-- Retain historical values and old request compatibility without assigning a category to new orders.
+alter table public.orders_orders alter column department drop not null;
 create table if not exists public.orders_items (
   id uuid primary key, order_id uuid not null references public.orders_orders(id),
   product_id uuid not null references public.orders_products(id), product_code text not null, product_name text not null,
@@ -140,11 +142,13 @@ begin
 end; $$;
 
 create or replace view orders_private.item_summary as
-select i.*,coalesce((select sum(si.quantity) from public.orders_shipment_items si
-  join public.orders_shipments s on s.id=si.shipment_id where si.item_id=i.id and s.voided_at is null),0) shipped_quantity
-from public.orders_items i;
+select i.id,i.order_id,i.product_id,i.product_code,i.product_name,i.specification,i.unit,i.quantity,i.position,
+  i.work_status,i.work_note,i.updated_by,i.updated_at,coalesce((select sum(si.quantity) from public.orders_shipment_items si
+  join public.orders_shipments s on s.id=si.shipment_id where si.item_id=i.id and s.voided_at is null),0) shipped_quantity,
+  p.department
+from public.orders_items i join public.orders_products p on p.id=i.product_id;
 create or replace view orders_private.order_summary as
-select o.id,o.order_no,o.department,o.client_id,o.client_name,o.delivery_name,o.delivery_address,o.delivery_phone,
+select o.id,o.order_no,coalesce(categories.department_ids[1],o.department) department,o.client_id,o.client_name,o.delivery_name,o.delivery_address,o.delivery_phone,
   o.ordered_on,o.requested_ship_date,o.client_reference,o.notes,o.status,o.created_by,o.submitted_at,
   o.approved_by,o.approved_at,o.return_reason,o.revision,o.created_at,o.updated_at,
   coalesce(w.worker_name,o.created_by) creator_name,
@@ -155,8 +159,15 @@ select o.id,o.order_no,o.department,o.client_id,o.client_name,o.delivery_name,o.
     when exists(select 1 from orders_private.item_summary i where i.order_id=o.id and i.shipped_quantity>0) then 'partial'
     when not exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'ready') then 'ready'
     when exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'unstarted') then 'working'
-    else 'confirmed' end progress,o.delivery_id,o.planned_carrier_id,o.planned_carrier_name
-from public.orders_orders o left join public.workers w on w.worker_id=o.created_by;
+    else 'confirmed' end progress,o.delivery_id,o.planned_carrier_id,o.planned_carrier_name,
+  coalesce(categories.department_ids,array_remove(array[o.department],null)) departments
+from public.orders_orders o left join public.workers w on w.worker_id=o.created_by
+left join lateral (
+  select array_agg(product_categories.department order by product_categories.first_position) department_ids
+  from (select p.department,min(i.position) first_position
+    from public.orders_items i join public.orders_products p on p.id=i.product_id
+    where i.order_id=o.id group by p.department) product_categories
+) categories on true;
 
 -- Derive the first destination without rewriting legacy master rows or order snapshots.
 create or replace function orders_private.client_destination(p_client_id uuid)
@@ -212,15 +223,16 @@ begin
   perform orders_private.require_user(p_worker_id);
   if v_facet is not null then
     select jsonb_build_object('values',coalesce(jsonb_agg(candidate order by candidate),'[]')) into v_result
-      from (select distinct orders_private.progress_column_value(o,v_facet) candidate
+      from (select distinct v.candidate
         from orders_private.order_summary o
-        where position(v_term in lower(normalize(orders_private.progress_column_value(o,v_facet),NFKC)))>0
-        order by candidate limit 121) choices;
+        cross join lateral unnest(case when v_facet='department' then o.departments else array[orders_private.progress_column_value(o,v_facet)] end) v(candidate)
+        where position(v_term in lower(normalize(v.candidate,NFKC)))>0
+        order by v.candidate limit 121) choices;
     return v_result;
   end if;
   with filtered as (
     select o.* from orders_private.order_summary o where
-      (coalesce(p_filters->>'department','')='' or o.department=p_filters->>'department')
+      (coalesce(p_filters->>'department','')='' or (p_filters->>'department')=any(o.departments))
       and (coalesce(p_filters->>'status','')='' or o.progress=p_filters->>'status')
       and (coalesce(p_filters->>'mine','false')<>'true' or o.created_by=p_worker_id)
       and (coalesce(p_filters->>'open','false')<>'true' or o.progress not in ('shipped','cancelled'))
@@ -228,12 +240,11 @@ begin
       and (nullif(p_filters->>'start','') is null or o.ordered_on >= (p_filters->>'start')::date)
       and (nullif(p_filters->>'end','') is null or o.ordered_on <= (p_filters->>'end')::date)
       and (v_columns='{}'::jsonb or not exists (
-        select 1 from jsonb_each(v_columns) f
-        cross join lateral (select orders_private.progress_column_value(o,f.key) candidate) v
-        where v.candidate is null
-          or position(lower(normalize(btrim(left(coalesce(f.value->>'text',''),160)),NFKC)) in lower(normalize(v.candidate,NFKC)))=0
-          or (jsonb_typeof(f.value->'include')='array' and not (f.value->'include' ? v.candidate))
-          or (jsonb_typeof(f.value->'exclude')='array' and f.value->'exclude' ? v.candidate)))
+        select 1 from jsonb_each(v_columns) f where not exists (
+          select 1 from unnest(case when f.key='department' then o.departments else array[orders_private.progress_column_value(o,f.key)] end) v(candidate)
+          where position(lower(normalize(btrim(left(coalesce(f.value->>'text',''),160)),NFKC)) in lower(normalize(v.candidate,NFKC)))>0
+            and (jsonb_typeof(f.value->'include') is distinct from 'array' or f.value->'include' ? v.candidate)
+            and (jsonb_typeof(f.value->'exclude') is distinct from 'array' or not (f.value->'exclude' ? v.candidate)))))
       and (coalesce(p_filters->>'q','')='' or position(lower(left(p_filters->>'q',120)) in
         lower(concat_ws(' ',o.order_no::text,'J-'||lpad(o.order_no::text,greatest(6,length(o.order_no::text)),'0'),o.client_name,o.delivery_name,o.client_reference,o.creator_name)))>0
         or exists(select 1 from public.orders_items i where i.order_id=o.id and position(lower(left(p_filters->>'q',120)) in lower(i.product_code||' '||i.product_name))>0))
@@ -302,6 +313,7 @@ returns jsonb language plpgsql security definer set search_path=pg_catalog,publi
 declare r public.orders_orders; c public.orders_clients; p public.orders_products; d public.orders_client_deliveries;
   x jsonb; n integer:=0; q numeric; v_id uuid; v_new boolean; v_before jsonb;
   v_delivery_id uuid; v_delivery_name text; v_delivery_address text; v_delivery_phone text; v_ordered_on date;
+  v_department text;
 begin
   perform orders_private.require_user(p_worker_id,'operator');
   if p_order_id is null or p_submit is null or p_header is null or jsonb_typeof(p_header)<>'object'
@@ -317,7 +329,6 @@ begin
     if r.created_by<>p_worker_id and not public.business_can('black_garlic_shipping','admin') then raise exception '登録担当者以外は変更できません。' using errcode='42501'; end if;
     v_before:=jsonb_build_object('header',to_jsonb(r),'items',coalesce((select jsonb_agg(to_jsonb(i) order by position) from public.orders_items i where order_id=p_order_id),'[]'));
   end if;
-  if coalesce(p_header->>'department','') not in ('dry','black','processed') then raise exception 'カテゴリを選択してください。'; end if;
   select * into c from public.orders_clients where id=(p_header->>'client_id')::uuid for share;
   if not found or (not c.active and c.id is distinct from r.client_id) then raise exception '取引先を選択してください。'; end if;
   v_delivery_id:=nullif(p_header->>'delivery_id','')::uuid;
@@ -344,18 +355,21 @@ begin
   if nullif(p_header->>'requested_ship_date','') is null then raise exception '出荷希望日を入力してください。'; end if;
   v_ordered_on:=coalesce(r.ordered_on,nullif(p_header->>'ordered_on','')::date,(now() at time zone 'Asia/Tokyo')::date);
   if v_new then
-    insert into public.orders_orders(id,department,client_id,client_name,delivery_id,delivery_name,delivery_address,delivery_phone,
+    insert into public.orders_orders(id,client_id,client_name,delivery_id,delivery_name,delivery_address,delivery_phone,
       ordered_on,requested_ship_date,client_reference,notes,status,created_by)
-    values(p_order_id,p_header->>'department',c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),v_delivery_id,v_delivery_name,v_delivery_address,
+    values(p_order_id,c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),v_delivery_id,v_delivery_name,v_delivery_address,
       v_delivery_phone,v_ordered_on,(p_header->>'requested_ship_date')::date,
       '',coalesce(p_header->>'notes',''),'draft',p_worker_id);
   end if;
   for x in select value from jsonb_array_elements(p_items) loop
     v_id:=(x->>'id')::uuid; q:=(x->>'quantity')::numeric;
+    -- The category validates the selected product; it is never written to the order.
+    v_department:=coalesce(x->>'department',p_header->>'department','');
+    if v_department not in ('dry','black','processed') then raise exception '明細のカテゴリを選択してください。'; end if;
     if v_id is null or q is null or q<=0 or q<>round(q,3) or q>99999999999.999 then raise exception '数量は0より大きい数値（小数3桁まで）で入力してください。'; end if;
     if exists(select 1 from public.orders_items where id=v_id and order_id<>p_order_id) then raise exception '明細IDが不正です。'; end if;
-    select * into p from public.orders_products where id=(x->>'product_id')::uuid;
-    if not found or p.department<>p_header->>'department' or (not p.active and not exists(select 1 from public.orders_items where order_id=p_order_id and id=v_id and product_id=p.id)) then
+    select * into p from public.orders_products where id=(x->>'product_id')::uuid for share;
+    if not found or p.department<>v_department or (not p.active and not exists(select 1 from public.orders_items where order_id=p_order_id and id=v_id and product_id=p.id)) then
       raise exception '選択したカテゴリの商品を指定してください。';
     end if;
     n:=n+1;
@@ -369,7 +383,7 @@ begin
       values((x->>'id')::uuid,p_order_id,p.id,p.code,p.name,p.specification,p.unit,(x->>'quantity')::numeric,n,p_worker_id);
   end loop;
   if p_header?'attachments' then perform orders_private.save_attachments(p_worker_id,p_order_id,p_header->'attachments'); end if;
-  update public.orders_orders set department=p_header->>'department',client_id=c.id,client_name=concat_ws(' ',c.name,nullif(c.store_name,'')),
+  update public.orders_orders set client_id=c.id,client_name=concat_ws(' ',c.name,nullif(c.store_name,'')),
     delivery_id=v_delivery_id,delivery_name=v_delivery_name,delivery_address=v_delivery_address,delivery_phone=v_delivery_phone,
     requested_ship_date=(p_header->>'requested_ship_date')::date,
     notes=coalesce(p_header->>'notes',''),

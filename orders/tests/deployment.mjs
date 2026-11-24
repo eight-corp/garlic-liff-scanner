@@ -100,7 +100,21 @@ select 'Progress column filters applied' result;
 commit;`;
 }
 
+export function lineCategoriesDeploymentSql(){
+  const schema=readSchema();
+  const select=(start,end)=>schemaSection(schema,start,end);
+  return `begin;
+set local lock_timeout='5s';
+${select('alter table public.orders_orders alter column department','create table if not exists public.orders_items')}
+${select('create or replace view orders_private.item_summary','create or replace function orders_private.client_destination')}
+${select('create or replace function public.orders_list','create or replace function public.orders_detail')}
+${select('create or replace function public.orders_save(','create or replace function orders_private.decide')}
+notify pgrst,'reload schema';
+select 'Order item categories applied' result;
+commit;`;
+}
+
 if(process.argv[2]){
-  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql}[process.argv[3]]||deploymentSql;
+  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql,categories:lineCategoriesDeploymentSql}[process.argv[3]]||deploymentSql;
   fs.writeFileSync(process.argv[2],generate());
 }
