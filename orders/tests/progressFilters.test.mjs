@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {database,seed} from './database.mjs';
-import {progressFiltersDeploymentSql} from './deployment.mjs';
+import {progressFiltersDeploymentSql,progressSortingDeploymentSql} from './deployment.mjs';
 
 test('progress column candidates and combined filters span pages and preserve viewer access rules',async()=>{
   const {db,rpc}=await database();
@@ -26,5 +26,40 @@ test('progress column candidates and combined filters span pages and preserve vi
     assert.equal((await list({columns:{progress:{include:[]}}})).total,0);
     assert.equal((await list({q:'J-000001'})).total,1);
     await assert.rejects(rpc('outsider','orders_list',{p_filters:{facet:'client_name'}}),/権限/);
+  }finally{await db.close();}
+});
+
+test('progress is sorted by ship date and total order quantity before pagination',async()=>{
+  const {db,rpc}=await database();
+  try{
+    await db.exec(progressSortingDeploymentSql());
+    const s=await seed(rpc);
+    const save=async(date,quantities)=>{
+      const id=crypto.randomUUID();
+      await rpc('sales','orders_save',{p_order_id:id,p_revision:0,
+        p_header:{...s.header,requested_ship_date:date},
+        p_items:quantities.map((quantity,i)=>({id:crypto.randomUUID(),quantity,department:i?'black':'dry',product_id:i?s.black.id:s.product.id}))});
+      return id;
+    };
+    const bigger=await save('2026-10-25',[6.5,6]);
+    const smaller=await save('2026-10-25',[12]);
+    const later=await save('2026-10-26',[100]);
+    const earlier=await save('2026-10-24',[1]);
+    const tie=await save('2026-10-25',[12.5]);
+    await db.query(`insert into orders_orders(id,client_id,client_name,delivery_name,ordered_on,requested_ship_date,status,created_by)
+      select gen_random_uuid(),$1,'別取引先','青森',date '2026-10-25',date '2026-10-23','pending','office'
+      from generate_series(1,49)`,[s.client.id]);
+    const list=filters=>rpc('viewer','orders_list',{p_filters:filters});
+    const first=await list({sort:'shipping_priority'});
+    assert.equal(first.total,54);
+    assert.equal(first.rows.length,50);
+    assert.equal(first.rows.at(-1).id,earlier);
+    const second=await list({sort:'shipping_priority',offset:50});
+    assert.deepEqual(second.rows.map(row=>row.id),[tie,bigger,smaller,later]);
+    assert.equal(second.rows.some(row=>'sort_ship_date' in row||'sort_quantity' in row),false);
+    const filtered=await list({sort:'shipping_priority',columns:{requested_ship_date:{include:['2026/10/25']}}});
+    assert.deepEqual(filtered.rows.map(row=>row.id),[tie,bigger,smaller]);
+    const search=await list({columns:{progress:{include:['draft']}}});
+    assert.deepEqual(search.rows.map(row=>row.id),[tie,earlier,later,smaller,bigger]);
   }finally{await db.close();}
 });

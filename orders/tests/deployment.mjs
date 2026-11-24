@@ -114,7 +114,16 @@ select 'Order item categories applied' result;
 commit;`;
 }
 
+export function progressSortingDeploymentSql(){
+  return `begin;
+set local lock_timeout='5s';
+${schemaSection(readSchema(),'create or replace function public.orders_list','create or replace function public.orders_detail')}
+commit;
+select 'Progress shipping priority applied' as result,
+  position('shipping_priority' in pg_get_functiondef('public.orders_list(text,jsonb)'::regprocedure))>0 as installed;`;
+}
+
 if(process.argv[2]){
-  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql,categories:lineCategoriesDeploymentSql}[process.argv[3]]||deploymentSql;
+  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql,categories:lineCategoriesDeploymentSql,sorting:progressSortingDeploymentSql}[process.argv[3]]||deploymentSql;
   fs.writeFileSync(process.argv[2],generate());
 }

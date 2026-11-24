@@ -216,6 +216,7 @@ $$;
 create or replace function public.orders_list(p_worker_id text,p_filters jsonb default '{}')
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare v_result jsonb; v_offset integer:=greatest(0,coalesce((p_filters->>'offset')::integer,0));
+  v_by_shipping boolean:=(p_filters->>'sort') is not distinct from 'shipping_priority';
   v_columns jsonb:=case when jsonb_typeof(p_filters->'columns')='object' then p_filters->'columns' else '{}' end;
   v_facet text:=nullif(p_filters->>'facet','');
   v_term text:=lower(normalize(btrim(left(coalesce(p_filters->>'facet_text',''),160)),NFKC));
@@ -248,8 +249,15 @@ begin
       and (coalesce(p_filters->>'q','')='' or position(lower(left(p_filters->>'q',120)) in
         lower(concat_ws(' ',o.order_no::text,'J-'||lpad(o.order_no::text,greatest(6,length(o.order_no::text)),'0'),o.client_name,o.delivery_name,o.client_reference,o.creator_name)))>0
         or exists(select 1 from public.orders_items i where i.order_id=o.id and position(lower(left(p_filters->>'q',120)) in lower(i.product_code||' '||i.product_name))>0))
-  ), page as (select * from filtered order by order_no desc limit 50 offset v_offset)
-  select jsonb_build_object('total',(select count(*) from filtered),'rows',coalesce((select jsonb_agg(to_jsonb(p) order by order_no desc) from page p),'[]')) into v_result;
+  ), page as (
+    select f.*,case when v_by_shipping then f.requested_ship_date end sort_ship_date,
+      case when v_by_shipping then coalesce((select sum(i.quantity) from public.orders_items i where i.order_id=f.id),0) end sort_quantity
+    from filtered f order by sort_ship_date asc nulls last,sort_quantity desc nulls last,order_no desc
+    limit 50 offset v_offset
+  )
+  select jsonb_build_object('total',(select count(*) from filtered),'rows',coalesce(
+    (select jsonb_agg(to_jsonb(p)-'sort_ship_date'-'sort_quantity'
+      order by p.sort_ship_date asc nulls last,p.sort_quantity desc nulls last,p.order_no desc) from page p),'[]')) into v_result;
   return v_result;
 end; $$;
 create or replace function public.orders_detail(p_worker_id text,p_order_id uuid)

@@ -55,3 +55,15 @@
 #progress-column-menu input[type="checkbox"]{width:16px;height:16px;flex:none;margin:0}
 #progress-column-options{padding-top:2px;border-top:1px solid var(--line)}
 @media print{.column-filter-toggle,#progress-column-menu{display:none!important}}
+.ship-table .ship-product,.ship-table [data-ship-total]{overflow-wrap:anywhere}
+@media(max-width:760px){
+  .ship-table{min-width:0;table-layout:fixed}
+  .ship-table th,.ship-table td{padding:8px 4px}
+  .ship-table th:first-child{width:26px}
+  .ship-table td:first-child{text-align:center}
+  .ship-table th:nth-child(3){width:44px}
+  .ship-table th:nth-child(4){width:68px}
+  .ship-table th:nth-child(5){width:66px}
+  .ship-table .item-quantities{white-space:normal;overflow-wrap:anywhere}
+  .ship-table .quantity-input{width:100%;padding-inline:5px}
+}
