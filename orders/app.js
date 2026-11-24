@@ -8,7 +8,6 @@ const badge=status=>`<span class="badge ${esc(status)}">${esc(statuses[status]||
 const button=(action,text,svg='edit',kind='secondary',extra='')=>`<button type="button" class="${kind}" data-action="${action}" ${extra}>${icon(svg)}${esc(text)}</button>`;
 const options=(values,value,empty='選択してください')=>`<option value="">${esc(empty)}</option>`+values.map(v=>`<option value="${esc(v.id)}" ${v.id===value?'selected':''}>${esc(v.label??v.name)}</option>`).join('');
 const deptOptions=value=>Object.entries(departments).map(([id,name])=>`<option value="${id}" ${id===value?'selected':''}>${name}</option>`).join('');
-const orderCategories=order=>Object.entries(departments).filter(([key])=>(order.departments||[order.department]).includes(key)).map(([,label])=>label).join('、');
 const field=(label,name,value='',type='text',extra='')=>`<label>${esc(label)}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;
 const entryMasterLabels={clients:'取引先',deliveries:'納品先',products:'商品'};
 const pickerButton=(kind,itemId='',disabled=false)=>`<button type="button" class="icon-button choice-search" data-action="open-entry-picker" data-kind="${kind}" data-id="${esc(itemId)}" title="${entryMasterLabels[kind]}を検索・追加" aria-label="${entryMasterLabels[kind]}を検索・追加" ${disabled?'disabled':''}>${icon('search')}</button>`;
@@ -17,8 +16,7 @@ const maxAttachments=5;
 let previewUrl='';
 const statusColumn=['progress','状態',statuses];
 const searchColumns=[
-  ['order_no','注文番号'],['department','カテゴリ',departments],['client_name','取引先'],['delivery_name','納品先'],
-  ['ordered_on','注文日'],['requested_ship_date','出荷希望日'],statusColumn,
+  ['client_name','取引先'],['delivery_name','納品先'],['requested_ship_date','出荷希望日'],statusColumn,
   ['shipment_progress','出荷済明細'],['creator_name','登録担当者'],['updated_at','更新日時']
 ];
 const progressColumns=[statusColumn,...searchColumns.filter(column=>column!==statusColumn)];
@@ -59,11 +57,9 @@ function filterForm(){const f=state.filters.search;return `<form id="filter-form
   </form>`;}
 function listRows(columns,progress){
   return state.list.rows.map(o=>{
-    const no=orderNumber(o.order_no);
     const cells={
-      order_no:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${no}を開く">${no}</button>`,
-      department:esc(orderCategories(o)),client_name:esc(o.client_name),delivery_name:esc(o.delivery_name),
-      ordered_on:date(o.ordered_on),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
+      client_name:`<button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${esc(o.client_name)}の注文を開く">${esc(o.client_name)}</button>`,
+      delivery_name:esc(o.delivery_name),requested_ship_date:date(o.requested_ship_date),progress:badge(o.progress),
       shipment_progress:`${o.shipped_item_count} / ${o.item_count}`,creator_name:esc(o.creator_name),
       updated_at:time(o.updated_at,progress?'Asia/Tokyo':undefined)
     };

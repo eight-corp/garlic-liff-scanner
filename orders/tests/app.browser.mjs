@@ -46,6 +46,7 @@ try {
     }
     try {
       const sales=await pageFor('sales');
+      const openClientOrder={name:s.client.name+'の注文を開く',exact:true};
       assert.equal(await sales.locator('#filter-form,.list-table').count(),0,'Order input has no search or list');
       assert.equal(await sales.getByRole('button',{name:'注文を追加',exact:true}).count(),0);
       assert.equal(await sales.locator('.main-nav button').evaluateAll(buttons=>buttons.every(el=>el.scrollWidth<=el.clientWidth&&parseFloat(getComputedStyle(el).fontSize)>=14)),true);
@@ -183,12 +184,12 @@ try {
       assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
       await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
       await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
-      assert.equal(await office.locator('.list-table thead th').first().innerText(),'状態');
+      assert.deepEqual(await office.locator('.list-table thead th span').allTextContents(),['状態','取引先','納品先','出荷希望日','出荷済明細','登録担当者','更新日時']);
       assert.equal(await office.locator('.list-table tbody td').first().innerText(),'承認待ち');
       assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
-      await office.getByRole('button',{name:'J-000001を開く',exact:true}).click();
+      await office.getByRole('button',openClientOrder).press('Enter');
       const officeOrder=office.locator('#order-dialog');
-      assert.equal(await officeOrder.getByRole('button',{name:'差戻し',exact:true}).isVisible(),true);
+      await officeOrder.getByRole('button',{name:'差戻し',exact:true}).waitFor();
       await officeOrder.getByRole('button',{name:'注文を確定',exact:true}).click();
       const approval=office.locator('#action-dialog');
       assert.equal(await approval.getByLabel('配送業者',{exact:true}).inputValue(),s.carrier.id);
@@ -204,8 +205,8 @@ try {
       await officeOrder.getByText(newCarrier.name,{exact:true}).waitFor();
       await sales.waitForFunction(()=>document.querySelector('.list-table tbody .badge')?.textContent==='未着手',{},{timeout:12000});
       await sales.getByRole('button',{name:'進捗一覧',exact:true}).click();
-      await sales.getByRole('button',{name:'カテゴリを絞り込む',exact:true}).waitFor();
-      await sales.getByRole('button',{name:'J-000001を開く',exact:true}).click();
+      await sales.getByRole('button',{name:'取引先を絞り込む',exact:true}).waitFor();
+      await sales.getByRole('button',openClientOrder).click();
       await order.getByLabel('乾燥にんにくの進捗',{exact:true}).selectOption('ready');
       await order.getByLabel('乾燥にんにくの作業メモ',{exact:true}).fill('梱包完了');
       await order.getByRole('button',{name:'乾燥にんにくの進捗を保存',exact:true}).click();
@@ -249,19 +250,20 @@ try {
       assert.equal(await order.locator('.detail-table tbody td').nth(3).innerText(),'0 袋');
       await order.getByRole('button',{name:'注文を閉じる',exact:true}).click();
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
-      await assertCategoryList(sales);
+      await assertSearchList(sales);
       await sales.locator('#filter-form').getByLabel('カテゴリ',{exact:true}).selectOption('black');
       await sales.locator('#filter-form').getByRole('button',{name:'検索',exact:true}).click();
       await sales.locator('.empty').filter({hasText:'該当する注文はありません'}).waitFor();
       await sales.locator('#filter-form').getByLabel('カテゴリ',{exact:true}).selectOption('dry');
-      await sales.locator('#filter-form').getByLabel('検索',{exact:true}).fill('テスト取引先');
+      await sales.locator('#filter-form').getByLabel('検索',{exact:true}).fill('J-000001');
       await sales.locator('#filter-form').getByRole('button',{name:'検索',exact:true}).click();
-      await sales.getByRole('button',{name:'J-000001を開く',exact:true}).waitFor();
+      await sales.getByRole('button',openClientOrder).waitFor();
       assert.equal(await sales.locator('.list-table .badge.shipped').count(),1);
       const viewer=await pageFor('viewer');
       assert.equal(await viewer.getByRole('button',{name:'注文入力',exact:true}).isDisabled(),true);
       await viewer.getByRole('button',{name:'注文検索',exact:true}).click();
-      await viewer.getByRole('button',{name:'J-000001を開く',exact:true}).click();
+      await viewer.locator('.list-table tbody tr[data-order]').first().locator('td').nth(1).click();
+      await viewer.locator('#order-dialog').waitFor();
       assert.equal(await viewer.locator('#order-dialog').getByRole('button',{name:'出荷を登録',exact:true}).count(),0);
       const admin=await pageFor('admin');
       await admin.getByRole('button',{name:'マスタ',exact:true}).click();
@@ -449,11 +451,11 @@ try {
       await office.getByRole('button',{name:'絞り込み解除',exact:true}).click();
       await office.waitForFunction(()=>document.querySelectorAll('.list-table tbody tr[data-order]').length===3);
       assert.deepEqual(await badges.allTextContents(),['承認待ち','出荷済み','下書き']);
-      assert.equal(await office.locator('.list-table tbody tr').first().locator('td').nth(2).innerText(),'乾燥にんにく、黒にんにく');
-      await office.getByRole('button',{name:'カテゴリを絞り込む',exact:true}).click();
-      await menu.getByRole('searchbox').fill('黒にんにく');
+      assert.equal(await office.locator('.list-table tbody tr').first().getByRole('button',{name:'テスト取引先 本店の注文を開く',exact:true}).count(),1);
+      await office.getByRole('button',{name:'出荷希望日を絞り込む',exact:true}).click();
+      await menu.getByRole('searchbox').fill('２０９９／１２／３１');
       await office.waitForFunction(()=>document.querySelectorAll('.list-table tbody tr[data-order]').length===1);
-      assert.deepEqual(await badges.allTextContents(),['承認待ち']);
+      assert.deepEqual(await badges.allTextContents(),['下書き']);
       await menu.getByRole('searchbox').press('Escape');
       assert.equal((await rpc('admin','orders_bootstrap')).canApprove,false,'Master admin does not inherit approval');
       if(artifacts)await admin.screenshot({path:path.join(artifacts,`orders-master-${width}.png`)});
@@ -464,11 +466,10 @@ try {
   }
 }finally {await browser.close();}
 
-async function assertCategoryList(page){
+async function assertSearchList(page){
   const filter=page.locator('#filter-form');
   await filter.getByLabel('カテゴリ',{exact:true}).waitFor();
   assert.equal(await filter.getByLabel('カテゴリ',{exact:true}).locator('option').first().innerText(),'全カテゴリ');
-  assert.equal(await page.locator('.list-table thead th').first().innerText(),'注文番号');
-  assert.equal(await page.locator('.list-table thead th').nth(1).innerText(),'カテゴリ');
+  assert.deepEqual(await page.locator('.list-table thead th').allTextContents(),['取引先','納品先','出荷希望日','状態','出荷済明細','登録担当者','更新日時']);
   assert.doesNotMatch(await page.locator('#view').innerText(),/部署/);
 }
