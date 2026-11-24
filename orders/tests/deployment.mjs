@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 
 const readSchema=()=>fs.readFileSync(new URL('../schema.sql',import.meta.url),'utf8').replace(/\r\n/g,'\n');
+function schemaSection(schema,start,end){
+  const from=schema.indexOf(start),to=schema.indexOf(end,from+start.length);
+  if(from<0||to<0)throw new Error('Migration boundaries not found: '+start);
+  return schema.slice(from,to).trim();
+}
 
 export function deploymentSql(){
   const schema=readSchema().trim().replace(/^begin;\s*/i,'').replace(/commit;$/i,'');
@@ -49,11 +54,7 @@ commit;`;
 
 export function officeDeploymentSql(){
   const schema=readSchema();
-  const select=(start,end)=>{
-    const from=schema.indexOf(start),to=schema.indexOf(end,from+start.length);
-    if(from<0||to<0)throw new Error('Office migration boundaries not found: '+start);
-    return schema.slice(from,to).trim();
-  };
+  const select=(start,end)=>schemaSection(schema,start,end);
   return `begin;
 set local lock_timeout='5s';
 set local statement_timeout='60s';
@@ -83,4 +84,23 @@ select 'Office order migration applied' result,
 commit;`;
 }
 
-if(process.argv[2])fs.writeFileSync(process.argv[2],process.argv[3]==='office'?officeDeploymentSql():deploymentSql());
+export function progressFiltersDeploymentSql(){
+  return `begin;
+set local lock_timeout='5s';
+${schemaSection(readSchema(),'create or replace function orders_private.progress_column_value','create or replace function public.orders_detail')}
+revoke all on function orders_private.progress_column_value(orders_private.order_summary,text) from public,anon,authenticated;
+do $check$
+begin
+  if has_function_privilege('anon','orders_private.progress_column_value(orders_private.order_summary,text)','EXECUTE')
+    or has_function_privilege('authenticated','orders_private.progress_column_value(orders_private.order_summary,text)','EXECUTE')
+    then raise exception 'Private progress function is exposed'; end if;
+end; $check$;
+notify pgrst,'reload schema';
+select 'Progress column filters applied' result;
+commit;`;
+}
+
+if(process.argv[2]){
+  const generate={office:officeDeploymentSql,progress:progressFiltersDeploymentSql}[process.argv[3]]||deploymentSql;
+  fs.writeFileSync(process.argv[2],generate());
+}

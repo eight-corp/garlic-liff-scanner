@@ -13,7 +13,7 @@ export function matchesOrderChoice(query,fields){
 }
 export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 export const date=value=>value?String(value).slice(0,10).replaceAll('-','/'):'—';
-export const time=value=>value?new Date(value).toLocaleString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+export const time=(value,timeZone)=>value?new Date(value).toLocaleString('ja-JP',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
 export function quantity(value){const text=String(value).normalize('NFKC').replaceAll(',','').trim();if(!/^\d+(\.\d{1,3})?$/.test(text)||Number(text)<=0||Number(text)>99999999999.999)throw new Error('数量は0より大きい数値（小数3桁まで）で入力してください。');return Number(text);}
 export function packedQuantity(value,packSize){
   if(!Number.isSafeInteger(packSize)||packSize<1)return null;

@@ -187,11 +187,37 @@ begin
     'canOperate',public.business_can('black_garlic_shipping','operator'),'canApprove',orders_private.can_approve(),
     'canMaster',public.business_can('black_garlic_shipping','admin'));
 end; $$;
+create or replace function orders_private.progress_column_value(o orders_private.order_summary,k text)
+returns text language sql stable set search_path=pg_catalog as $$
+  select case k
+    when 'order_no' then 'J-'||lpad(o.order_no::text,greatest(6,length(o.order_no::text)),'0')
+    when 'department' then o.department
+    when 'client_name' then o.client_name
+    when 'delivery_name' then o.delivery_name
+    when 'ordered_on' then to_char(o.ordered_on,'YYYY/MM/DD')
+    when 'requested_ship_date' then to_char(o.requested_ship_date,'YYYY/MM/DD')
+    when 'progress' then o.progress
+    when 'shipment_progress' then o.shipped_item_count::text||' / '||o.item_count::text
+    when 'creator_name' then o.creator_name
+    when 'updated_at' then to_char(o.updated_at at time zone 'Asia/Tokyo','YYYY/MM/DD HH24:MI')
+  end;
+$$;
 create or replace function public.orders_list(p_worker_id text,p_filters jsonb default '{}')
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare v_result jsonb; v_offset integer:=greatest(0,coalesce((p_filters->>'offset')::integer,0));
+  v_columns jsonb:=case when jsonb_typeof(p_filters->'columns')='object' then p_filters->'columns' else '{}' end;
+  v_facet text:=nullif(p_filters->>'facet','');
+  v_term text:=lower(normalize(btrim(left(coalesce(p_filters->>'facet_text',''),160)),NFKC));
 begin
   perform orders_private.require_user(p_worker_id);
+  if v_facet is not null then
+    select jsonb_build_object('values',coalesce(jsonb_agg(candidate order by candidate),'[]')) into v_result
+      from (select distinct orders_private.progress_column_value(o,v_facet) candidate
+        from orders_private.order_summary o
+        where position(v_term in lower(normalize(orders_private.progress_column_value(o,v_facet),NFKC)))>0
+        order by candidate limit 121) choices;
+    return v_result;
+  end if;
   with filtered as (
     select o.* from orders_private.order_summary o where
       (coalesce(p_filters->>'department','')='' or o.department=p_filters->>'department')
@@ -201,6 +227,13 @@ begin
       and (coalesce(p_filters->>'confirmed','false')<>'true' or o.status='confirmed')
       and (nullif(p_filters->>'start','') is null or o.ordered_on >= (p_filters->>'start')::date)
       and (nullif(p_filters->>'end','') is null or o.ordered_on <= (p_filters->>'end')::date)
+      and (v_columns='{}'::jsonb or not exists (
+        select 1 from jsonb_each(v_columns) f
+        cross join lateral (select orders_private.progress_column_value(o,f.key) candidate) v
+        where v.candidate is null
+          or position(lower(normalize(btrim(left(coalesce(f.value->>'text',''),160)),NFKC)) in lower(normalize(v.candidate,NFKC)))=0
+          or (jsonb_typeof(f.value->'include')='array' and not (f.value->'include' ? v.candidate))
+          or (jsonb_typeof(f.value->'exclude')='array' and f.value->'exclude' ? v.candidate)))
       and (coalesce(p_filters->>'q','')='' or position(lower(left(p_filters->>'q',120)) in
         lower(concat_ws(' ',o.order_no::text,'J-'||lpad(o.order_no::text,greatest(6,length(o.order_no::text)),'0'),o.client_name,o.delivery_name,o.client_reference,o.creator_name)))>0
         or exists(select 1 from public.orders_items i where i.order_id=o.id and position(lower(left(p_filters->>'q',120)) in lower(i.product_code||' '||i.product_name))>0))

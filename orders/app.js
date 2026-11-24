@@ -1,9 +1,9 @@
-import {departments,statuses,workStatuses,eventNames,esc,number,remaining,orderNumber,today,date,time,quantity,matchesOrderChoice,packedQuantity,formatPackedQuantity} from './model.js?v=20261124-pack-totals';
+import {departments,statuses,workStatuses,eventNames,esc,number,remaining,orderNumber,today,date,time,quantity,matchesOrderChoice,packedQuantity,formatPackedQuantity} from './model.js?v=20261124-column-filters';
 
 const auth=window.BusinessAuth;
 auth.init(window.BusinessConfig.url,window.BusinessConfig.key);
 const $=id=>document.getElementById(id);
-const icon=name=>`<svg aria-hidden="true"><use href="./icons.svg#${name}"></use></svg>`;
+const icon=name=>`<svg aria-hidden="true"><use href="./icons.svg?v=20261124-column-filters#${name}"></use></svg>`;
 const badge=status=>`<span class="badge ${esc(status)}">${esc(statuses[status]||workStatuses[status]||status)}</span>`;
 const button=(action,text,svg='edit',kind='secondary',extra='')=>`<button type="button" class="${kind}" data-action="${action}" ${extra}>${icon(svg)}${esc(text)}</button>`;
 const options=(values,value,empty='選択してください')=>`<option value="">${esc(empty)}</option>`+values.map(v=>`<option value="${esc(v.id)}" ${v.id===value?'selected':''}>${esc(v.label??v.name)}</option>`).join('');
@@ -14,9 +14,15 @@ const pickerButton=(kind,itemId='',disabled=false)=>`<button type="button" class
 let entryPicker=null;
 const maxAttachments=5;
 let previewUrl='';
+const progressColumns=[
+  ['order_no','注文番号'],['department','カテゴリ',departments],['client_name','取引先'],['delivery_name','納品先'],
+  ['ordered_on','注文日'],['requested_ship_date','出荷希望日'],['progress','状態',statuses],
+  ['shipment_progress','出荷済明細'],['creator_name','登録担当者'],['updated_at','更新日時']
+];
+let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
   approval:{q:'',department:'',status:'pending',start:'',end:'',mine:false,open:false,offset:0},
-  progress:{q:'',department:'',status:'',start:'',end:'',mine:false,open:false,offset:0},
+  progress:{columns:{},offset:0},
   search:{q:'',department:'',status:'',start:'',end:'',mine:false,open:false,offset:0}
 }};
 function notice(text,error=false,warning=false){$('notice').hidden=!text;$('notice').className=error?'error':warning?'warning':'';$('notice').innerHTML=`<span>${esc(text)}</span><button type="button" class="icon-button" data-action="dismiss-notice" title="閉じる" aria-label="通知を閉じる">${icon('close')}</button>`;}
@@ -26,7 +32,19 @@ async function busy(root,fn,errorId){const controls=[...root.querySelectorAll('b
 function capabilities(){return state.boot||{};}
 function syncLabel(offline=false){$('sync').classList.toggle('offline',offline);$('sync').textContent=offline?'接続できません':'同期 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
 async function bootstrap(){state.boot=await rpc('orders_bootstrap');state.version=state.boot.version;document.querySelector('[data-view="input"]').disabled=!state.boot.canOperate;refreshPackTotals('entry-form',state.entryDraft);refreshPackTotals('draft-form',state.draft);}
-function listFilters(){const filters={...state.filters[state.view]};if(state.view==='approval')filters.status='pending';return filters;}
+const columnText=(value,text)=>String(value).normalize('NFKC').toLowerCase().includes(text.normalize('NFKC').trim().toLowerCase());
+const selectedColumnValue=(filter,value)=>filter.include?filter.include.includes(value):!filter.exclude?.includes(value);
+function listFilters(){
+  const filters={...state.filters[state.view]};
+  if(state.view==='approval')filters.status='pending';
+  if(state.view==='progress')filters.columns=Object.fromEntries(progressColumns.flatMap(([key,,choices])=>{
+    const filter=filters.columns[key];
+    if(!filter)return [];
+    if(choices&&filter.text)return [[key,{include:Object.entries(choices).filter(([id,label])=>selectedColumnValue(filter,id)&&columnText(label,filter.text)).map(([id])=>id)}]];
+    return [[key,filter]];
+  }));
+  return filters;
+}
 function filterForm(){const f=state.filters[state.view];return `<form id="filter-form" class="filters">
   <label class="wide">検索<input name="q" type="search" value="${esc(f.q)}" placeholder="注文番号・取引先・納品先・商品" maxlength="120"></label>
   <label>カテゴリ<select aria-label="カテゴリ" name="department">${options(Object.entries(departments).map(([id,name])=>({id,name})),f.department,'全カテゴリ')}</select></label>
@@ -35,14 +53,100 @@ function filterForm(){const f=state.filters[state.view];return `<form id="filter
   ${state.view!=='approval'?`<label class="check"><input type="checkbox" name="open" ${f.open?'checked':''}>未完了のみ</label>`:''}
   <div class="row filter-actions"><button class="primary" type="submit">${icon('search')}検索</button><button type="button" class="icon-button" data-action="clear-filters" title="絞り込みをクリア" aria-label="絞り込みをクリア">${icon('reset')}</button></div>
   </form>`;}
-function renderList(){const titles={approval:'注文確定',progress:'進捗一覧',search:'過去注文検索'};$('view').innerHTML=`
-  <div class="page-heading"><div><h2>${titles[state.view]}</h2><div class="muted">${number(state.list.total)}件</div></div></div>
-  ${filterForm()}<div class="table-wrap"><table class="list-table"><thead><tr><th>注文番号</th><th>カテゴリ</th><th>取引先</th><th>納品先</th><th>注文日</th><th>出荷希望日</th><th>状態</th><th>出荷済明細</th><th>登録担当者</th><th>更新日時</th></tr></thead><tbody>
-  ${state.list.rows.map(o=>`<tr data-order="${o.id}"><td><button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${orderNumber(o.order_no)}を開く">${orderNumber(o.order_no)}</button></td><td>${departments[o.department]}</td><td>${esc(o.client_name)}</td><td>${esc(o.delivery_name)}</td><td>${date(o.ordered_on)}</td><td>${date(o.requested_ship_date)}</td><td>${badge(o.progress)}</td><td class="numeric">${o.shipped_item_count} / ${o.item_count}</td><td>${esc(o.creator_name)}</td><td>${time(o.updated_at)}</td></tr>`).join('')}
-  </tbody></table>${state.list.rows.length?'':'<div class="empty">該当する注文はありません</div>'}</div>
-  <div class="pager"><span>${state.list.total?`${number(state.filters[state.view].offset+1)}–${number(Math.min(state.filters[state.view].offset+50,state.list.total))} / `:''}${number(state.list.total)}件</span><button class="icon-button" type="button" data-action="previous-page" title="前のページ" aria-label="前のページ" ${state.filters[state.view].offset===0?'disabled':''}>${icon('left')}</button><button class="icon-button" type="button" data-action="next-page" title="次のページ" aria-label="次のページ" ${state.filters[state.view].offset+50>=state.list.total?'disabled':''}>${icon('right')}</button></div>`;}
+function listRows(){
+  return state.list.rows.map(o=>`<tr data-order="${o.id}"><td><button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${orderNumber(o.order_no)}を開く">${orderNumber(o.order_no)}</button></td><td>${departments[o.department]}</td><td>${esc(o.client_name)}</td><td>${esc(o.delivery_name)}</td><td>${date(o.ordered_on)}</td><td>${date(o.requested_ship_date)}</td><td>${badge(o.progress)}</td><td class="numeric">${o.shipped_item_count} / ${o.item_count}</td><td>${esc(o.creator_name)}</td><td>${state.view==='progress'?time(o.updated_at,'Asia/Tokyo'):time(o.updated_at)}</td></tr>`).join('');
+}
+function renderList(){
+  const progress=state.view==='progress',titles={approval:'注文確定',progress:'進捗一覧',search:'過去注文検索'};
+  if(!progress||!$('progress-column-table')){
+    $('view').innerHTML=`<div class="page-heading"><div><h2>${titles[state.view]}</h2><div id="order-list-count" class="muted"></div></div>
+      ${progress?button('clear-filters','絞り込み解除','reset'):''}</div>
+    ${progress?'':filterForm()}<div class="table-wrap"><table class="list-table" ${progress?'id="progress-column-table"':''}><thead><tr>
+      ${progressColumns.map(([key,label])=>progress?`<th scope="col"><div class="progress-column-heading"><span>${label}</span><button type="button" class="column-filter-toggle" data-action="column-filter" data-column="${key}" aria-expanded="false" aria-controls="progress-column-menu" title="${label}を絞り込む" aria-label="${label}を絞り込む">${icon('filter')}</button></div></th>`:`<th>${label}</th>`).join('')}
+    </tr></thead><tbody id="order-list-rows"></tbody></table><div id="order-list-empty" class="empty" hidden>該当する注文はありません</div></div>
+    <div class="pager"><span id="order-list-page"></span><button class="icon-button" type="button" data-action="previous-page" title="前のページ" aria-label="前のページ">${icon('left')}</button><button class="icon-button" type="button" data-action="next-page" title="次のページ" aria-label="次のページ">${icon('right')}</button></div>`;
+  }
+  const offset=state.filters[state.view].offset,total=state.list.total;
+  $('order-list-count').textContent=number(total)+'件';
+  $('order-list-rows').innerHTML=listRows();
+  $('order-list-empty').hidden=state.list.rows.length>0;
+  $('order-list-page').textContent=total?`${number(offset+1)}–${number(Math.min(offset+50,total))} / ${number(total)}件`:'0件';
+  $('view').querySelector('[data-action="previous-page"]').disabled=offset===0;
+  $('view').querySelector('[data-action="next-page"]').disabled=offset+50>=total;
+  if(progress)updateColumnIndicators();
+}
+function updateColumnIndicators(){
+  const table=$('progress-column-table');
+  if(!table)return;
+  const filters=state.filters.progress.columns;
+  table.querySelectorAll('[data-column]').forEach(el=>{
+    el.classList.toggle('filtered',!!filters[el.dataset.column]);
+    el.setAttribute('aria-expanded',String(columnMenu?.key===el.dataset.column&&$('progress-column-menu').matches(':popover-open')));
+  });
+  $('view').querySelector('[data-action="clear-filters"]').disabled=!Object.keys(filters).length;
+}
+function placeColumnMenu(){
+  if(!columnMenu)return;
+  const menu=$('progress-column-menu'),container=columnMenu.trigger.closest('.table-wrap');
+  if(!container||!columnMenu.trigger.isConnected){menu.hidePopover();return;}
+  const rect=columnMenu.trigger.getBoundingClientRect(),wrap=container.getBoundingClientRect();
+  const viewport=window.visualViewport,x=viewport?.offsetLeft??0,y=viewport?.offsetTop??0,w=viewport?.width??innerWidth,h=viewport?.height??innerHeight;
+  if(rect.right<Math.max(x,wrap.left)||rect.left>Math.min(x+w,wrap.right)||rect.bottom<y||rect.top>y+h){menu.hidePopover();return;}
+  const width=Math.min(250,w-16),below=y+h-rect.bottom-12,above=rect.top-y-12,up=below<210&&above>below;
+  const maxHeight=Math.min(330,Math.max(up?above:below,90));
+  Object.assign(menu.style,{width:width+'px',left:Math.min(Math.max(rect.left,x+8),x+w-width-8)+'px',maxHeight:maxHeight+'px',
+    top:up?'auto':Math.max(y+8,Math.min(rect.bottom+4,y+h-98))+'px',
+    bottom:up?Math.max(innerHeight-rect.top+4,innerHeight-y-h+8)+'px':'auto'});
+}
+function refreshColumnChecks(menu){
+  const filter=state.filters.progress.columns[menu.key]||{};
+  const all=$('progress-column-all');
+  all.checked=!filter.include&&!filter.exclude?.length;
+  all.indeterminate=!!(filter.include?.length||filter.exclude?.length);
+  $('progress-column-options').querySelectorAll('input').forEach(el=>el.checked=selectedColumnValue(filter,el.value));
+}
+async function loadColumnChoices(menu){
+  const request=++menu.request,term=state.filters.progress.columns[menu.key]?.text||'',list=$('progress-column-options');
+  try{
+    let entries;
+    if(menu.choices)entries=Object.entries(menu.choices).filter(([,label])=>columnText(label,term));
+    else{
+      const result=await rpc('orders_list',{p_filters:{facet:menu.key,facet_text:term}});
+      entries=result.values.map(value=>[value,value]);
+    }
+    if(columnMenu!==menu||request!==menu.request||!$('progress-column-menu').matches(':popover-open'))return;
+    menu.loadedTerm=term;
+    list.innerHTML=entries.slice(0,120).map(([value,label])=>`<label class="check"><input type="checkbox" data-column-value value="${esc(value)}"><span>${esc(label||'（空白）')}</span></label>`).join('')
+      +(entries.length===0?'<p class="muted">一致する候補がありません</p>':entries.length>120?'<p class="muted">先頭120件</p>':'');
+    refreshColumnChecks(menu);
+  }catch(error){if(columnMenu===menu&&request===menu.request&&$('progress-column-menu').matches(':popover-open'))list.textContent=error.message;}
+}
+function openColumnMenu(trigger){
+  const popover=$('progress-column-menu');
+  if(columnMenu?.trigger===trigger&&popover.matches(':popover-open')){popover.hidePopover();return;}
+  const [key,label,choices]=progressColumns.find(([key])=>key===trigger.dataset.column);
+  const menu=columnMenu={key,label,choices,trigger,request:0};
+  $('progress-column-title').textContent=label;
+  const input=$('progress-column-text');
+  input.value=state.filters.progress.columns[key]?.text||'';
+  input.setAttribute('aria-label',label+'を文字で絞り込む');
+  $('progress-column-options').textContent='読み込み中…';
+  if(!popover.matches(':popover-open'))popover.showPopover({source:trigger});
+  placeColumnMenu();updateColumnIndicators();refreshColumnChecks(menu);void loadColumnChoices(menu);
+}
+function changeColumnFilter(menu,filter,typing=false){
+  const f=state.filters.progress;
+  if(filter.text?.trim()||filter.include||filter.exclude?.length)f.columns[menu.key]=filter;
+  else delete f.columns[menu.key];
+  f.offset=0;state.load++;updateColumnIndicators();refreshColumnChecks(menu);
+  clearTimeout(columnRefresh);
+  if(typing){
+    menu.request++;
+    columnRefresh=setTimeout(()=>{if(state.view==='progress')void loadList();if(columnMenu===menu)void loadColumnChoices(menu);},180);
+  }else{void loadList();if(menu.loadedTerm!==(filter.text||''))void loadColumnChoices(menu);}
+}
 async function loadList(){if(state.view==='input'){state.load++;$('view').removeAttribute('aria-busy');if(!$('entry-form')||!capabilities().canOperate)renderInput();return;}if(state.view==='master'){renderMaster();return;}const token=++state.load;const filters=listFilters();$('view').setAttribute('aria-busy','true');try{const result=await rpc('orders_list',{p_filters:filters});if(token!==state.load)return;state.list=result;renderList();}catch(error){if(token===state.load)notice(error.message,true);}finally{if(token===state.load)$('view').removeAttribute('aria-busy');}}
-function activateView(view){if(!state.boot||state.entrySaving)return;state.view=view;document.querySelectorAll('[data-view]').forEach(el=>{el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});return loadList();}
+function activateView(view){if(!state.boot||state.entrySaving)return;if($('progress-column-menu').matches(':popover-open'))$('progress-column-menu').hidePopover();clearTimeout(columnRefresh);state.view=view;document.querySelectorAll('[data-view]').forEach(el=>{el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});return loadList();}
 
 function orderHeading(){const h=state.detail?.header;$('order-title').textContent=state.draft?(h?orderNumber(h.order_no)+' の変更':'注文を追加'):orderNumber(h.order_no);$('order-subtitle').textContent=state.draft?'':departments[h.department]+' / '+statuses[h.progress];$('order-error').hidden=true;document.querySelector('[data-action="detail-refresh"]').hidden=!!state.draft;}
 function newDraft(){return {id:crypto.randomUUID(),revision:0,header:{department:'dry',client_id:'',delivery_id:'',delivery_name:'',delivery_address:'',delivery_phone:'',requested_ship_date:today(),notes:''},items:[{id:crypto.randomUUID(),product_id:'',quantity:'1'}],attachments:[]};}
@@ -299,13 +403,25 @@ document.addEventListener('click',async event=>{
   if(action==='add-delivery'){if(document.querySelectorAll('[data-delivery]').length>=100){showError('action-error',new Error('納品先は100件までです。'));return;}$('delivery-rows').insertAdjacentHTML('beforeend',deliveryRow());state.actionDirty=true;return;}
   if(action==='remove-delivery'){control.closest('[data-delivery]').remove();state.actionDirty=true;return;}
   if(action==='master-kind'){state.master=control.dataset.kind;state.masterQuery='';renderMaster();return;}
-  if(action==='clear-filters'){state.filters[state.view]={q:'',department:'',status:state.view==='approval'?'pending':'',start:'',end:'',mine:false,open:false,offset:0};void loadList();return;}
+  if(action==='column-filter'){openColumnMenu(control);return;}
+  if(action==='clear-column-filter'&&columnMenu){
+    $('progress-column-text').value='';changeColumnFilter(columnMenu,{});return;
+  }
+  if(action==='clear-filters'){
+    if(state.view==='progress'){
+      $('progress-column-menu').hidePopover();clearTimeout(columnRefresh);state.filters.progress={columns:{},offset:0};
+    }else state.filters[state.view]={q:'',department:'',status:state.view==='approval'?'pending':'',start:'',end:'',mine:false,open:false,offset:0};
+    void loadList();return;
+  }
   if(action==='previous-page'||action==='next-page'){state.filters[state.view].offset+=action==='next-page'?50:-50;void loadList();return;}
   if(action==='detail-refresh'){if(state.dirty&&!confirm('未保存の内容を破棄して更新しますか？'))return;await openOrder(state.detail.header.id);return;}
   if(action==='refresh'){if(state.entrySaving)return;await busy($('view'),async()=>{await bootstrap();await loadList();if(state.view==='input'&&capabilities().canOperate)renderInput();syncLabel();});return;}
   if(action==='logout'){if(!confirm('ログアウトしますか？'))return;await busy($('view'),async()=>{await auth.logout();location.href='../menu.html?openExternalBrowser=1';});}
 });
 document.addEventListener('input',event=>{
+  if(event.target.id==='progress-column-text'&&columnMenu){
+    changeColumnFilter(columnMenu,{...state.filters.progress.columns[columnMenu.key],text:event.target.value},true);return;
+  }
   if(event.target.id==='entry-choice-search'){entryPicker.query=event.target.value;renderPickerResults();return;}
   const masterForm=event.target.closest('#master-form,#entry-master-form');
   if(masterForm?.dataset.kind==='products'&&event.target.name==='code')updateJanWarning(masterForm);
@@ -327,6 +443,18 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',async event=>{
   const target=event.target;
+  if(columnMenu&&(target.id==='progress-column-all'||target.hasAttribute('data-column-value'))){
+    const filter={...state.filters.progress.columns[columnMenu.key]};
+    if(target.id==='progress-column-all'){
+      delete filter.exclude;delete filter.include;
+      if(!target.checked)filter.include=[];
+    }else{
+      const mode=filter.include?'include':'exclude',values=new Set(filter[mode]);
+      if(target.checked===(mode==='include'))values.add(target.value);else values.delete(target.value);
+      filter[mode]=[...values];
+    }
+    changeColumnFilter(columnMenu,filter);return;
+  }
   const ctx=draftContext(target),draft=ctx.draft;
   if(target.matches('[data-attachment-files]')){
     const files=Array.from(target.files);target.value='';
@@ -400,6 +528,11 @@ document.addEventListener('submit',async event=>{
   if(form.id==='void-form'){await busy($('action-dialog'),async()=>{const data=await rpc('orders_void_shipment',{p_order_id:state.detail.header.id,p_revision:state.detail.header.revision,p_shipment_id:form.dataset.shipment,p_reason:form.elements.reason.value});state.actionDirty=false;$('action-dialog').close();await applyDetail(data,'出荷記録を取消しました。');},'action-error');}
 });
 $('order-dialog').addEventListener('cancel',event=>{event.preventDefault();closeOrder();});
+$('progress-column-menu').addEventListener('toggle',()=>{if(!$('progress-column-menu').matches(':popover-open'))columnMenu=null;updateColumnIndicators();});
+document.addEventListener('scroll',event=>{if(columnMenu&&$('progress-column-menu').matches(':popover-open')&&!$('progress-column-menu').contains(event.target))placeColumnMenu();},true);
+window.addEventListener('resize',placeColumnMenu);
+window.visualViewport?.addEventListener('resize',placeColumnMenu);
+window.visualViewport?.addEventListener('scroll',placeColumnMenu);
 $('action-dialog').addEventListener('cancel',event=>{event.preventDefault();closeAction();});
 $('image-dialog').addEventListener('close',()=>{if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl='';}$('image-dialog').querySelector('.image-body').replaceChildren();});
 $('image-dialog').addEventListener('click',event=>{

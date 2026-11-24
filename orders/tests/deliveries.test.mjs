@@ -65,7 +65,7 @@ test('legacy orders remain editable without changing their destination or remove
     const s=await seed(rpc);
     let detail=await rpc('sales','orders_save',{p_order_id:s.orderId,p_revision:0,p_header:s.header,p_items:s.items});
     await db.query("update orders_orders set delivery_id=null,delivery_name='旧納品先',delivery_address='旧住所',delivery_phone='旧電話',client_reference='旧番号' where id=$1",[s.orderId]);
-    await db.exec('drop view orders_private.order_summary;alter table orders_orders drop column delivery_id;drop table orders_client_deliveries;');
+    await db.exec('drop function orders_private.progress_column_value(orders_private.order_summary,text);drop view orders_private.order_summary;alter table orders_orders drop column delivery_id;drop table orders_client_deliveries;');
     await db.exec(deploymentSql());
     detail=await rpc('sales','orders_detail',{p_order_id:s.orderId});
     const {client_reference,...header}=detail.header;
