@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 
+const readSchema=()=>fs.readFileSync(new URL('../schema.sql',import.meta.url),'utf8').replace(/\r\n/g,'\n');
+
 export function deploymentSql(){
-  const schema=fs.readFileSync(new URL('../schema.sql',import.meta.url),'utf8').trim().replace(/^begin;\s*/i,'').replace(/commit;$/i,'');
+  const schema=readSchema().trim().replace(/^begin;\s*/i,'').replace(/commit;$/i,'');
   return `begin;
 set local lock_timeout='5s';
 set local statement_timeout='90s';
@@ -30,10 +32,12 @@ begin
     execute format('select count(*),md5(coalesce(string_agg(h, '''' order by h),'''')) from (select md5(to_jsonb(t)::text) h from (select %s from %I.%I) t%s) rows',r.column_sql,r.schema_name,r.table_name,filter_sql) into n,h;
     if n<>r.row_count or h<>r.fingerprint then raise exception 'Existing data changed: %.%',r.schema_name,r.table_name; end if;
   end loop;
-  if (select count(*) from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname in ('orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events') and c.relrowsecurity)<>10 then raise exception 'RLS check failed'; end if;
+  if (select count(*) from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname in ('orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events','orders_attachments') and c.relrowsecurity)<>11 then raise exception 'RLS check failed'; end if;
   if exists(select 1 from pg_class c join pg_namespace ns on ns.oid=c.relnamespace where ns.nspname='public' and c.relname like 'orders\\_%' escape '\\' and c.relkind='r' and (has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') or has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE'))) then raise exception 'Direct table access detected'; end if;
   if has_function_privilege('anon','orders_private.save_master(text,text,uuid,integer,jsonb)','EXECUTE')
     or has_function_privilege('authenticated','orders_private.save_master(text,text,uuid,integer,jsonb)','EXECUTE') then raise exception 'Private master writer is exposed'; end if;
+  if exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='orders_private'
+    and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE'))) then raise exception 'Private order function is exposed'; end if;
 end; $verify$;
 select 'Orders installed; existing business data and user permissions unchanged' result,
   (select count(*) from orders_deployment_guard) existing_tables_verified,
@@ -43,4 +47,40 @@ select 'Orders installed; existing business data and user permissions unchanged'
 commit;`;
 }
 
-if(process.argv[2])fs.writeFileSync(process.argv[2],deploymentSql());
+export function officeDeploymentSql(){
+  const schema=readSchema();
+  const select=(start,end)=>{
+    const from=schema.indexOf(start),to=schema.indexOf(end,from+start.length);
+    if(from<0||to<0)throw new Error('Office migration boundaries not found: '+start);
+    return schema.slice(from,to).trim();
+  };
+  return `begin;
+set local lock_timeout='5s';
+set local statement_timeout='60s';
+${select('alter table public.orders_orders\n  add column if not exists planned_carrier_id','create table if not exists public.orders_shipments')}
+alter table public.orders_attachments enable row level security;
+revoke all on table public.orders_attachments from public,anon,authenticated;
+${select('create or replace view orders_private.order_summary','create or replace function orders_private.client_destination')}
+${select('create or replace function public.orders_detail','create or replace function public.orders_progress')}
+revoke all on function orders_private.save_attachments(text,uuid,jsonb),orders_private.decide(text,uuid,integer,text,text,uuid,text) from public,anon,authenticated;
+revoke all on function public.orders_attachment(text,uuid,uuid),public.orders_approve(text,uuid,integer,uuid,text) from public,anon,authenticated;
+grant execute on function public.orders_attachment(text,uuid,uuid),public.orders_approve(text,uuid,integer,uuid,text) to anon,authenticated;
+do $check$
+begin
+  if not (select relrowsecurity from pg_class where oid='public.orders_attachments'::regclass)
+    or has_table_privilege('anon','public.orders_attachments','SELECT,INSERT,UPDATE,DELETE')
+    or has_table_privilege('authenticated','public.orders_attachments','SELECT,INSERT,UPDATE,DELETE')
+    then raise exception 'Attachment permissions check failed'; end if;
+  if exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='orders_private'
+    and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE')))
+    then raise exception 'Private order function is exposed'; end if;
+end; $check$;
+notify pgrst,'reload schema';
+select 'Office order migration applied' result,
+  (select count(*) from public.orders_orders) existing_orders,
+  (select count(*) from public.orders_attachments) attachments,
+  (select count(*) from business_private.permissions where app_id='order_approval') approval_assignments;
+commit;`;
+}
+
+if(process.argv[2])fs.writeFileSync(process.argv[2],process.argv[3]==='office'?officeDeploymentSql():deploymentSql());

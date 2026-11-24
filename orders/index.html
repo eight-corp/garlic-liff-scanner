@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#246747">
   <title>注文管理 | 株式会社エイト</title>
   <link rel="icon" href="./icons.svg#package" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=20261121-entry-master">
+  <link rel="stylesheet" href="./styles.css?v=20261124-office-orders">
 </head>
 <body>
   <header class="app-header">
@@ -25,8 +25,9 @@
   <main id="view" aria-busy="true"><div class="empty">読み込み中...</div></main>
   <dialog id="order-dialog" aria-labelledby="order-title"><div class="dialog-header"><div><h2 id="order-title">注文</h2><span id="order-subtitle"></span></div><div class="row"><button type="button" class="icon-button" data-action="detail-refresh" title="注文を更新" aria-label="注文を更新"><svg aria-hidden="true"><use href="./icons.svg#refresh"></use></svg></button><button type="button" class="icon-button" data-action="close-order" title="閉じる" aria-label="注文を閉じる"><svg aria-hidden="true"><use href="./icons.svg#close"></use></svg></button></div></div><div id="order-error" class="error" role="alert" hidden></div><div id="order-body"></div></dialog>
   <dialog id="action-dialog" aria-labelledby="action-title"><div class="dialog-header"><h2 id="action-title"></h2><button type="button" class="icon-button" data-action="close-action" title="閉じる" aria-label="操作画面を閉じる"><svg aria-hidden="true"><use href="./icons.svg#close"></use></svg></button></div><div id="action-error" class="error" role="alert" hidden></div><div id="action-body"></div></dialog>
+  <dialog id="image-dialog" aria-labelledby="image-title"><div class="dialog-header"><h2 id="image-title">保存した注文画像</h2><button type="button" class="icon-button" data-action="close-image" title="閉じる" aria-label="画像を閉じる"><svg aria-hidden="true"><use href="./icons.svg#close"></use></svg></button></div><div class="image-body"></div></dialog>
   <script src="../shared/business-auth.js?v=20260928-session-persistence"></script>
   <script src="../shared/business-config.js"></script>
-  <script type="module" src="./app.js?v=20261121-entry-master"></script>
+  <script type="module" src="./app.js?v=20261124-office-orders"></script>
 </body>
 </html>

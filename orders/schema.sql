@@ -72,6 +72,17 @@ create table if not exists public.orders_items (
   work_note text not null default '', updated_by text references public.workers(worker_id), updated_at timestamptz not null default now()
 );
 alter table public.orders_orders add column if not exists delivery_id uuid references public.orders_client_deliveries(id);
+alter table public.orders_orders
+  add column if not exists planned_carrier_id uuid references public.orders_carriers(id),
+  add column if not exists planned_carrier_name text not null default '';
+create table if not exists public.orders_attachments (
+  id uuid primary key, order_id uuid not null references public.orders_orders(id),
+  name text not null check(length(name) between 1 and 160),
+  image_data bytea not null check(octet_length(image_data) between 4 and 750000),
+  position integer not null,
+  created_by text not null references public.workers(worker_id), created_at timestamptz not null default now()
+);
+create index if not exists orders_attachments_order_lookup on public.orders_attachments(order_id,position);
 create table if not exists public.orders_shipments (
   id uuid primary key, order_id uuid not null references public.orders_orders(id), shipped_on date not null,
   carrier_id uuid references public.orders_carriers(id), carrier_name text not null default '', tracking_no text not null default '',
@@ -98,7 +109,7 @@ create index if not exists orders_client_deliveries_client on public.orders_clie
 do $security$
 declare t text;
 begin
-  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events'] loop
+  foreach t in array array['orders_clients','orders_products','orders_carriers','orders_client_products','orders_client_deliveries','orders_orders','orders_items','orders_shipments','orders_shipment_items','orders_events','orders_attachments'] loop
     execute format('alter table public.%I enable row level security',t);
     execute format('revoke all on table public.%I from public, anon, authenticated',t);
   end loop;
@@ -144,7 +155,7 @@ select o.id,o.order_no,o.department,o.client_id,o.client_name,o.delivery_name,o.
     when exists(select 1 from orders_private.item_summary i where i.order_id=o.id and i.shipped_quantity>0) then 'partial'
     when not exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'ready') then 'ready'
     when exists(select 1 from public.orders_items i where i.order_id=o.id and i.work_status<>'unstarted') then 'working'
-    else 'confirmed' end progress,o.delivery_id
+    else 'confirmed' end progress,o.delivery_id,o.planned_carrier_id,o.planned_carrier_name
 from public.orders_orders o left join public.workers w on w.worker_id=o.created_by;
 
 -- Derive the first destination without rewriting legacy master rows or order snapshots.
@@ -205,6 +216,7 @@ begin
   select to_jsonb(o) into v_header from orders_private.order_summary o where id=p_order_id;
   if v_header is null then raise exception '注文が見つかりません。'; end if;
   return jsonb_build_object('header',v_header,
+    'attachments',coalesce((select jsonb_agg(jsonb_build_object('id',a.id,'name',a.name) order by a.position) from public.orders_attachments a where a.order_id=p_order_id),'[]'),
     'items',coalesce((select jsonb_agg(to_jsonb(i) order by position) from orders_private.item_summary i where order_id=p_order_id),'[]'),
     'shipments',coalesce((select jsonb_agg(to_jsonb(s)-'request_payload'||jsonb_build_object('worker_name',w.worker_name,
       'items',(select jsonb_agg(to_jsonb(si)||jsonb_build_object('product_name',i.product_name,'unit',i.unit)) from public.orders_shipment_items si join public.orders_items i on i.id=si.item_id where si.shipment_id=s.id)) order by s.created_at desc)
@@ -212,11 +224,51 @@ begin
     'events',coalesce((select jsonb_agg(to_jsonb(e)||jsonb_build_object('worker_name',w.worker_name) order by event_no desc) from public.orders_events e left join public.workers w on w.worker_id=e.actor_id where e.order_id=p_order_id),'[]'));
 end; $$;
 
+create or replace function public.orders_attachment(p_worker_id text,p_order_id uuid,p_attachment_id uuid)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
+declare v_result jsonb;
+begin
+  perform orders_private.require_user(p_worker_id);
+  select jsonb_build_object('name',name,'data',encode(image_data,'base64')) into v_result
+    from public.orders_attachments where id=p_attachment_id and order_id=p_order_id;
+  if not found then raise exception '添付画像が見つかりません。'; end if;
+  return v_result;
+end; $$;
+
+create or replace function orders_private.save_attachments(p_worker_id text,p_order_id uuid,p_attachments jsonb)
+returns void language plpgsql security definer set search_path=pg_catalog,public as $$
+declare x jsonb; v_id uuid; v_ids uuid[]:='{}'; v_name text; v_data bytea; v_encoded text; v_position integer:=0;
+begin
+  if jsonb_typeof(p_attachments) is distinct from 'array' or jsonb_array_length(p_attachments)>5 then
+    raise exception '添付画像は1件の注文につき5枚までです。';
+  end if;
+  for x in select value from jsonb_array_elements(p_attachments) loop
+    v_id:=(x->>'id')::uuid;
+    if v_id is null or v_id=any(v_ids) then raise exception '添付画像の指定が重複または不足しています。'; end if;
+    v_ids:=array_append(v_ids,v_id); v_position:=v_position+1;
+    if x?'data' then
+      v_name:=btrim(coalesce(x->>'name','')); v_encoded:=coalesce(x->>'data','');
+      if length(v_name) not between 1 and 160 or length(v_encoded) not between 4 and 1000000 then raise exception '添付画像の名前またはサイズが不正です。'; end if;
+      v_data:=decode(v_encoded,'base64');
+      if octet_length(v_data)<4 or substring(v_data from 1 for 3)<>decode('ffd8ff','hex')
+        or substring(v_data from octet_length(v_data)-1 for 2)<>decode('ffd9','hex') then raise exception '添付できるのはJPEG画像です。'; end if;
+      insert into public.orders_attachments(id,order_id,name,image_data,position,created_by)
+        values(v_id,p_order_id,v_name,v_data,v_position,p_worker_id)
+        on conflict(id) do nothing;
+      if not found then raise exception '添付画像はすでに使用されています。'; end if;
+    else
+      update public.orders_attachments set position=v_position where id=v_id and order_id=p_order_id;
+      if not found then raise exception 'この注文の添付画像ではありません。'; end if;
+    end if;
+  end loop;
+  delete from public.orders_attachments where order_id=p_order_id and not(id=any(v_ids));
+end; $$;
+
 create or replace function public.orders_save(p_worker_id text,p_order_id uuid,p_revision integer,p_header jsonb,p_items jsonb,p_submit boolean default false)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare r public.orders_orders; c public.orders_clients; p public.orders_products; d public.orders_client_deliveries;
   x jsonb; n integer:=0; q numeric; v_id uuid; v_new boolean; v_before jsonb;
-  v_delivery_id uuid; v_delivery_name text; v_delivery_address text; v_delivery_phone text;
+  v_delivery_id uuid; v_delivery_name text; v_delivery_address text; v_delivery_phone text; v_ordered_on date;
 begin
   perform orders_private.require_user(p_worker_id,'operator');
   if p_order_id is null or p_submit is null or p_header is null or jsonb_typeof(p_header)<>'object'
@@ -256,12 +308,13 @@ begin
       v_delivery_name:=d.name; v_delivery_address:=concat_ws(' ',nullif(d.postal_code,''),nullif(d.address,'')); v_delivery_phone:=d.phone;
     end if;
   end if;
-  if nullif(p_header->>'ordered_on','') is null or nullif(p_header->>'requested_ship_date','') is null then raise exception '注文日・出荷希望日を入力してください。'; end if;
+  if nullif(p_header->>'requested_ship_date','') is null then raise exception '出荷希望日を入力してください。'; end if;
+  v_ordered_on:=coalesce(r.ordered_on,nullif(p_header->>'ordered_on','')::date,(now() at time zone 'Asia/Tokyo')::date);
   if v_new then
     insert into public.orders_orders(id,department,client_id,client_name,delivery_id,delivery_name,delivery_address,delivery_phone,
       ordered_on,requested_ship_date,client_reference,notes,status,created_by)
     values(p_order_id,p_header->>'department',c.id,concat_ws(' ',c.name,nullif(c.store_name,'')),v_delivery_id,v_delivery_name,v_delivery_address,
-      v_delivery_phone,(p_header->>'ordered_on')::date,(p_header->>'requested_ship_date')::date,
+      v_delivery_phone,v_ordered_on,(p_header->>'requested_ship_date')::date,
       '',coalesce(p_header->>'notes',''),'draft',p_worker_id);
   end if;
   for x in select value from jsonb_array_elements(p_items) loop
@@ -282,9 +335,10 @@ begin
     insert into public.orders_items(id,order_id,product_id,product_code,product_name,specification,unit,quantity,position,updated_by)
       values((x->>'id')::uuid,p_order_id,p.id,p.code,p.name,p.specification,p.unit,(x->>'quantity')::numeric,n,p_worker_id);
   end loop;
+  if p_header?'attachments' then perform orders_private.save_attachments(p_worker_id,p_order_id,p_header->'attachments'); end if;
   update public.orders_orders set department=p_header->>'department',client_id=c.id,client_name=concat_ws(' ',c.name,nullif(c.store_name,'')),
     delivery_id=v_delivery_id,delivery_name=v_delivery_name,delivery_address=v_delivery_address,delivery_phone=v_delivery_phone,
-    ordered_on=(p_header->>'ordered_on')::date,requested_ship_date=(p_header->>'requested_ship_date')::date,
+    requested_ship_date=(p_header->>'requested_ship_date')::date,
     notes=coalesce(p_header->>'notes',''),
     status=case when p_submit then 'pending' else 'draft' end,submitted_at=case when p_submit then now() else null end,return_reason=''
     where id=p_order_id;
@@ -292,9 +346,10 @@ begin
   return public.orders_detail(p_worker_id,p_order_id);
 end; $$;
 
-create or replace function public.orders_decide(p_worker_id text,p_order_id uuid,p_revision integer,p_action text,p_reason text default '')
+create or replace function orders_private.decide(p_worker_id text,p_order_id uuid,p_revision integer,p_action text,p_reason text,p_carrier_id uuid,p_new_carrier_name text)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
-declare r public.orders_orders;
+declare r public.orders_orders; c public.orders_carriers;
+  v_name text:=btrim(coalesce(p_new_carrier_name,''));
 begin
   r:=orders_private.lock_order(p_worker_id,p_order_id,p_revision);
   if not orders_private.can_approve() then raise exception '注文承認の権限がありません。' using errcode='42501'; end if;
@@ -304,13 +359,39 @@ begin
   if p_action='cancel' then
     if r.status='cancelled' or exists(select 1 from public.orders_shipments where order_id=p_order_id and voided_at is null) then raise exception '出荷記録がある注文は取消できません。先に出荷記録を取消してください。'; end if;
   end if;
+  if p_action='approve' then
+    if p_carrier_id is not null and p_new_carrier_name is not null then raise exception '既存の配送業者か新規の配送業者のどちらかを指定してください。'; end if;
+    if p_carrier_id is not null then
+      select * into c from public.orders_carriers where id=p_carrier_id and active for share;
+      if not found then raise exception '配送業者が利用できません。'; end if;
+    elsif p_new_carrier_name is not null then
+      if length(v_name) not between 1 and 160 then raise exception '配送業者名を入力してください。'; end if;
+      perform pg_advisory_xact_lock(20261121,1);
+      if exists(select 1 from public.orders_carriers where lower(btrim(name))=lower(v_name)) then
+        raise exception '同じ名前の配送業者が登録済みです。一覧から選択してください。';
+      end if;
+      c.id:=gen_random_uuid();
+      insert into public.orders_carriers(id,code,name) values(c.id,'D-'||c.id::text,v_name) returning * into c;
+      perform orders_private.event(null,p_worker_id,'entry_master',jsonb_build_object('kind','carriers','id',c.id));
+    end if;
+  end if;
   update public.orders_orders set status=case p_action when 'approve' then 'confirmed' when 'return' then 'returned' else 'cancelled' end,
     approved_by=case when p_action='approve' then p_worker_id else approved_by end,
     approved_at=case when p_action='approve' then now() else approved_at end,
-    return_reason=case when p_action='return' then btrim(p_reason) else return_reason end where id=p_order_id;
+    return_reason=case when p_action='return' then btrim(p_reason) else return_reason end,
+    planned_carrier_id=case when p_action='approve' then c.id else planned_carrier_id end,
+    planned_carrier_name=case when p_action='approve' then coalesce(c.name,'') else planned_carrier_name end where id=p_order_id;
   perform orders_private.event(p_order_id,p_worker_id,case p_action when 'approve' then 'approved' when 'return' then 'returned' else 'cancelled' end,jsonb_build_object('reason',coalesce(p_reason,'')));
   return public.orders_detail(p_worker_id,p_order_id);
 end; $$;
+create or replace function public.orders_decide(p_worker_id text,p_order_id uuid,p_revision integer,p_action text,p_reason text default '')
+returns jsonb language sql security definer set search_path=pg_catalog,public as $$
+  select orders_private.decide(p_worker_id,p_order_id,p_revision,p_action,p_reason,null,null);
+$$;
+create or replace function public.orders_approve(p_worker_id text,p_order_id uuid,p_revision integer,p_carrier_id uuid default null,p_new_carrier_name text default null)
+returns jsonb language sql security definer set search_path=pg_catalog,public as $$
+  select orders_private.decide(p_worker_id,p_order_id,p_revision,'approve','',p_carrier_id,p_new_carrier_name);
+$$;
 create or replace function public.orders_progress(p_worker_id text,p_order_id uuid,p_revision integer,p_item_id uuid,p_status text,p_note text default '')
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
 declare r public.orders_orders;
@@ -546,7 +627,7 @@ do $permissions$
 declare r record;
 begin
   for r in select p.oid::regprocedure signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname='public' and p.proname in ('orders_bootstrap','orders_version','orders_list','orders_detail','orders_save','orders_decide','orders_progress','orders_ship','orders_void_shipment','orders_save_master','orders_create_entry_master') loop
+    where n.nspname='public' and p.proname in ('orders_bootstrap','orders_version','orders_list','orders_detail','orders_attachment','orders_save','orders_decide','orders_approve','orders_progress','orders_ship','orders_void_shipment','orders_save_master','orders_create_entry_master') loop
     execute format('revoke all on function %s from public,anon,authenticated',r.signature);
     execute format('grant execute on function %s to anon,authenticated',r.signature);
   end loop;
