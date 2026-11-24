@@ -21,7 +21,7 @@ const searchColumns=[
   shipmentProgressColumn,['creator_name','登録担当者'],['updated_at','更新日時']
 ];
 const progressColumns=[statusColumn,...searchColumns.flatMap(column=>
-  column===statusColumn?[]:column===shipmentProgressColumn?[['product_name','商品名'],['order_quantity','注文数'],column]:[column]
+  column===statusColumn||column[0]==='creator_name'?[]:column===shipmentProgressColumn?[['product_name','商品名'],['order_quantity','注文数'],column]:[column]
 )];
 let columnMenu=null,columnRefresh=0;
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
