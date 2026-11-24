@@ -48,8 +48,10 @@ try {
       const sales=await pageFor('sales');
       assert.equal(await sales.locator('#filter-form,.list-table').count(),0,'Order input has no search or list');
       assert.equal(await sales.getByRole('button',{name:'注文を追加',exact:true}).count(),0);
+      assert.equal(await sales.locator('.main-nav button').evaluateAll(buttons=>buttons.every(el=>el.scrollWidth<=el.clientWidth&&parseFloat(getComputedStyle(el).fontSize)>=14)),true);
       const entry=sales.locator('#entry-body');
       const order=sales.locator('#order-dialog');
+      assert.equal(await entry.getByLabel('数量',{exact:true}).evaluate(el=>getComputedStyle(el).fontSize),'17px');
       assert.equal(await entry.getByLabel('出荷希望日',{exact:true}).inputValue(),databaseDay);
       assert.equal(await entry.locator('[name=ordered_on], [name=carrier_id]').count(),0);
       assert.deepEqual(await entry.locator('.draft-table th').allTextContents(),['品名','数量','入数','合計数','']);
@@ -173,10 +175,14 @@ try {
       assert.equal(await entry.getByLabel('取引先名',{exact:true}).inputValue(),'');
       await sales.getByRole('button',{name:'注文検索',exact:true}).click();
       const office=await pageFor('office');
-      await office.getByRole('button',{name:'注文確定',exact:true}).click();
-      await assertCategoryList(office);
+      assert.deepEqual(await office.locator('.main-nav button').allTextContents(),['注文入力','進捗一覧','注文検索','マスタ']);
+      await office.getByRole('button',{name:'進捗一覧',exact:true}).click();
+      await office.getByRole('heading',{name:'進捗一覧',exact:true}).waitFor();
+      assert.equal(await office.locator('.list-table .badge.pending').innerText(),'承認待ち');
+      assert.equal(await office.locator('.list-table td').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
       await office.getByRole('button',{name:'J-000001を開く',exact:true}).click();
       const officeOrder=office.locator('#order-dialog');
+      assert.equal(await officeOrder.getByRole('button',{name:'差戻し',exact:true}).isVisible(),true);
       await officeOrder.getByRole('button',{name:'注文を確定',exact:true}).click();
       const approval=office.locator('#action-dialog');
       assert.equal(await approval.getByLabel('配送業者',{exact:true}).inputValue(),s.carrier.id);
