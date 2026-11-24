@@ -16,7 +16,7 @@ const maxAttachments=5;
 let previewUrl='';
 const state={session:null,boot:null,view:'input',master:'products',masterQuery:'',list:{rows:[],total:0},version:0,load:0,detail:null,draft:null,entryDraft:null,entryDirty:false,entrySaving:false,dirty:false,actionDirty:false,progressDrafts:new Map(),detailNotice:'',syncing:false,filters:{
   approval:{q:'',department:'',status:'pending',start:'',end:'',mine:false,open:false,offset:0},
-  progress:{q:'',department:'',status:'',start:'',end:'',mine:false,open:true,offset:0},
+  progress:{q:'',department:'',status:'',start:'',end:'',mine:false,open:false,offset:0},
   search:{q:'',department:'',status:'',start:'',end:'',mine:false,open:false,offset:0}
 }};
 function notice(text,error=false,warning=false){$('notice').hidden=!text;$('notice').className=error?'error':warning?'warning':'';$('notice').innerHTML=`<span>${esc(text)}</span><button type="button" class="icon-button" data-action="dismiss-notice" title="閉じる" aria-label="通知を閉じる">${icon('close')}</button>`;}
@@ -26,16 +26,16 @@ async function busy(root,fn,errorId){const controls=[...root.querySelectorAll('b
 function capabilities(){return state.boot||{};}
 function syncLabel(offline=false){$('sync').classList.toggle('offline',offline);$('sync').textContent=offline?'接続できません':'同期 '+new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
 async function bootstrap(){state.boot=await rpc('orders_bootstrap');state.version=state.boot.version;document.querySelector('[data-view="input"]').disabled=!state.boot.canOperate;refreshPackTotals('entry-form',state.entryDraft);refreshPackTotals('draft-form',state.draft);}
-function listFilters(){const filters={...state.filters[state.view]};if(state.view==='approval')filters.status='pending';if(state.view==='progress')filters.confirmed=true;return filters;}
+function listFilters(){const filters={...state.filters[state.view]};if(state.view==='approval')filters.status='pending';return filters;}
 function filterForm(){const f=state.filters[state.view];return `<form id="filter-form" class="filters">
   <label class="wide">検索<input name="q" type="search" value="${esc(f.q)}" placeholder="注文番号・取引先・納品先・商品" maxlength="120"></label>
   <label>カテゴリ<select aria-label="カテゴリ" name="department">${options(Object.entries(departments).map(([id,name])=>({id,name})),f.department,'全カテゴリ')}</select></label>
-  ${state.view==='approval'?'':`<label>状態<select aria-label="状態" name="status">${options(Object.entries(statuses).filter(([id])=>state.view!=='progress'||['confirmed','working','ready','partial','shipped'].includes(id)).map(([id,name])=>({id,name})),f.status,'すべて')}</select></label>`}
+  ${state.view==='approval'?'':`<label>状態<select aria-label="状態" name="status">${options(Object.entries(statuses).map(([id,name])=>({id,name})),f.status,'すべて')}</select></label>`}
   ${field('注文日から','start',f.start,'date')}${field('注文日まで','end',f.end,'date')}
   ${state.view!=='approval'?`<label class="check"><input type="checkbox" name="open" ${f.open?'checked':''}>未完了のみ</label>`:''}
   <div class="row filter-actions"><button class="primary" type="submit">${icon('search')}検索</button><button type="button" class="icon-button" data-action="clear-filters" title="絞り込みをクリア" aria-label="絞り込みをクリア">${icon('reset')}</button></div>
   </form>`;}
-function renderList(){const titles={approval:'注文確定',progress:'進捗入力',search:'過去注文検索'};$('view').innerHTML=`
+function renderList(){const titles={approval:'注文確定',progress:'進捗一覧',search:'過去注文検索'};$('view').innerHTML=`
   <div class="page-heading"><div><h2>${titles[state.view]}</h2><div class="muted">${number(state.list.total)}件</div></div></div>
   ${filterForm()}<div class="table-wrap"><table class="list-table"><thead><tr><th>注文番号</th><th>カテゴリ</th><th>取引先</th><th>納品先</th><th>注文日</th><th>出荷希望日</th><th>状態</th><th>出荷済明細</th><th>登録担当者</th><th>更新日時</th></tr></thead><tbody>
   ${state.list.rows.map(o=>`<tr data-order="${o.id}"><td><button type="button" class="order-link" data-action="open-order" data-id="${o.id}" aria-label="${orderNumber(o.order_no)}を開く">${orderNumber(o.order_no)}</button></td><td>${departments[o.department]}</td><td>${esc(o.client_name)}</td><td>${esc(o.delivery_name)}</td><td>${date(o.ordered_on)}</td><td>${date(o.requested_ship_date)}</td><td>${badge(o.progress)}</td><td class="numeric">${o.shipped_item_count} / ${o.item_count}</td><td>${esc(o.creator_name)}</td><td>${time(o.updated_at)}</td></tr>`).join('')}
